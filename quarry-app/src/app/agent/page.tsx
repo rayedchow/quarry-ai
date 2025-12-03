@@ -10,6 +10,7 @@ import {
   Trash2,
   Wallet2,
   X,
+  ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -23,6 +24,7 @@ import {
 import { ChatInput } from "@/components/ui/chat-input";
 import { ChatMessageList } from "@/components/ui/chat-message-list";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 type Message = {
   id: number;
@@ -138,6 +140,8 @@ function AgentPageContent() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [expandedDataset, setExpandedDataset] = useState<string | null>(null);
+  const [sliceHighlight, setSliceHighlight] = useState(false);
 
   const estimatedRows = 2000;
   const pricePerRow = 0.002;
@@ -160,6 +164,8 @@ function AgentPageContent() {
     ]);
     setInput("");
     setIsLoading(true);
+    setSliceHighlight(true);
+    setTimeout(() => setSliceHighlight(false), 700);
 
     setTimeout(() => {
       setMessages((prev) => [
@@ -179,7 +185,7 @@ function AgentPageContent() {
     <div className="container py-16">
       <div className="flex flex-col gap-8 xl:flex-row">
         <div className="space-y-8 xl:w-[40%]">
-          <div className="rounded-3xl border border-white/10 bg-black/40 p-6">
+          <div className="space-y-6 rounded-3xl border border-white/10 bg-black/40 p-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.4em] text-primary">
@@ -195,8 +201,8 @@ function AgentPageContent() {
                 asChild
               >
                 <Link href="/datasets">
+                  + Add data
                   <Plus className="h-4 w-4" />
-                  Add dataset
                 </Link>
               </Button>
             </div>
@@ -210,37 +216,74 @@ function AgentPageContent() {
                 const dataset = datasets.find((d) => d.slug === slug);
                 if (!dataset) return null;
                 return (
-                  <div
-                    key={slug}
-                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                  >
-                    <div className="flex items-center justify-between text-sm text-white/80">
-                      <span>{dataset.name}</span>
-                      <button
-                        className="text-white/50 hover:text-white"
-                        onClick={() => handleRemoveDataset(slug)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="mt-3 grid gap-2 text-xs text-white/60">
-                      {dataset.schema.slice(0, 3).map((column) => (
-                        <div
-                          key={column.name}
-                          className="flex items-center justify-between rounded-xl border border-white/5 bg-black/40 px-3 py-2"
+                  <div key={slug} className="rounded-2xl bg-white/[0.03] p-4">
+                    <div className="flex items-start justify-between text-sm text-white">
+                      <div>
+                        <p className="font-semibold">{dataset.name}</p>
+                        <p className="text-xs uppercase tracking-[0.3em] text-white/50">
+                          {dataset.columnCount} columns
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="text-white/50 hover:text-white"
+                          onClick={() => handleRemoveDataset(slug)}
+                          aria-label="Remove dataset"
                         >
-                          <span>{column.name}</span>
-                          <span>{column.type}</span>
-                        </div>
-                      ))}
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="text-white/50 hover:text-white"
+                          onClick={() =>
+                            setExpandedDataset((prev) =>
+                              prev === slug ? null : slug
+                            )
+                          }
+                          aria-label="Toggle schema"
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 transition",
+                              expandedDataset === slug && "rotate-180"
+                            )}
+                          />
+                        </button>
+                      </div>
                     </div>
+                    {expandedDataset === slug && (
+                      <div className="mt-3 space-y-2 text-xs text-white/65">
+                        {dataset.schema.slice(0, 3).map((column) => (
+                          <div
+                            key={column.name}
+                            className="flex items-center justify-between rounded-xl bg-black/30 px-3 py-2"
+                          >
+                            <div>
+                              <p className="font-medium">{column.name}</p>
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-white/40">
+                                {column.type}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                        {dataset.schema.length > 3 && (
+                          <p className="text-[10px] text-white/40">
+                            + more columns
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-6">
+          <div
+            className={cn(
+              "rounded-3xl border border-white/10 bg-black/30 p-6 transition",
+              sliceHighlight && "ring-1 ring-primary/40"
+            )}
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.4em] text-primary">
@@ -258,35 +301,37 @@ function AgentPageContent() {
               {slicePreview.map((entry) => (
                 <div
                   key={entry.column}
-                  className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.03] px-3 py-3 text-sm text-white/80"
+                  className="flex items-center justify-between rounded-2xl bg-white/[0.04] px-3 py-3 text-sm text-white"
                 >
                   <div>
                     <p className="font-medium">{entry.column}</p>
                     <p className="text-xs text-white/50">{entry.dataset}</p>
                   </div>
-                  <span className="text-xs uppercase tracking-[0.3em] text-primary">
-                    {entry.type}
-                  </span>
+                  <span className="text-xs text-white/40">{entry.type}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-            <div className="flex items-center justify-between text-sm text-white/80">
+          <div className="space-y-4 rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-transparent p-6 text-white shadow-[0_20px_60px_rgba(15,23,42,0.4)]">
+            <div className="flex items-center justify-between text-sm text-white/70">
               <span>Rows requested</span>
-              <span>{estimatedRows.toLocaleString()}</span>
+              <span className="font-semibold text-white">
+                {estimatedRows.toLocaleString()}
+              </span>
             </div>
-            <div className="flex items-center justify-between text-sm text-white/80">
+            <div className="flex items-center justify-between text-sm text-white/70">
               <span>Datasets included</span>
-              <span>{selectedDatasets.length}</span>
+              <span className="font-semibold text-white">
+                {selectedDatasets.length}
+              </span>
             </div>
-            <div className="flex items-center justify-between text-lg font-semibold text-white">
+            <div className="flex items-center justify-between text-2xl font-semibold text-white">
               <span>Est. total</span>
               <span>{totalCost.toFixed(3)} SOL</span>
             </div>
             <Button
-              className="mt-2 h-12 gap-2 rounded-full bg-gradient-to-r from-primary to-blue-500 text-white"
+              className="mt-2 h-12 gap-2 rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 text-slate-950 shadow-glow"
               onClick={() => setCheckoutOpen(true)}
             >
               <Sparkles className="h-4 w-4" />
@@ -346,13 +391,13 @@ function AgentPageContent() {
             <div className="border-t border-white/5 p-4">
               <form
                 onSubmit={handleSubmit}
-                className="space-y-3 rounded-2xl border border-white/10 bg-black/70 p-3"
+                className="space-y-3 rounded-2xl border border-white/10 bg-black/70 p-4"
               >
                 <ChatInput
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   placeholder="“Get me 500 positive churn rows and join age + salary.”"
-                  className="min-h-12 resize-none border-0 bg-transparent px-0 text-white"
+                  className="min-h-16 resize-none border-0 bg-transparent px-0 text-white text-base"
                 />
                 <div className="flex items-center justify-between">
                   <div className="flex gap-2">
