@@ -1,8 +1,9 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight, Plus } from "lucide-react";
+import { ArrowUpRight, Plus, Layers, Coins } from "lucide-react";
 import { Dataset } from "@/data/datasets";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -20,83 +21,93 @@ export function DatasetCard({
   return (
     <div
       className={cn(
-        "group relative flex flex-col rounded-3xl border border-white/5 bg-gradient-to-b from-white/5 to-transparent/10 p-6 shadow-[0_20px_80px_rgba(15,23,42,0.35)] backdrop-blur hover:border-primary/40 hover:shadow-glow",
+        "group relative flex flex-col rounded-3xl border border-white/[0.06] bg-white/[0.02] p-6 backdrop-blur-sm transition-all duration-300",
+        "hover:border-white/[0.12] hover:bg-white/[0.04] hover:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)]",
         className,
       )}
     >
+      {/* Header */}
       <div className="flex items-start gap-4">
-        <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-transparent">
           <Image
             src={dataset.image}
             alt={dataset.name}
             fill
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
-            sizes="64px"
+            className="object-cover transition-transform duration-500 group-hover:scale-110"
+            sizes="56px"
           />
         </div>
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-primary/80">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-cyan-400/80 uppercase tracking-wider">
             {dataset.publisher}
           </p>
-          <h3 className="mt-2 text-xl font-semibold text-white">
+          <h3 className="mt-1 text-lg font-semibold text-white truncate group-hover:text-cyan-400 transition-colors">
             {dataset.name}
           </h3>
-          <p className="mt-2 text-sm text-white/70">{dataset.summary}</p>
         </div>
       </div>
 
-      <div className="mt-6 flex flex-wrap gap-2 text-sm">
+      {/* Summary */}
+      <p className="mt-4 text-sm text-white/50 leading-relaxed line-clamp-2">
+        {dataset.summary}
+      </p>
+
+      {/* Tags */}
+      <div className="mt-4 flex flex-wrap gap-2">
         {dataset.tags.slice(0, 3).map((tag) => (
           <span
             key={tag}
-            className="rounded-full border border-white/15 px-3 py-1 text-white/70"
+            className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-white/60"
           >
             {tag}
           </span>
         ))}
         {dataset.tags.length > 3 && (
-          <span className="text-xs uppercase tracking-[0.2em] text-white/40">
-            +{dataset.tags.length - 3} more
+          <span className="px-2 py-1 text-xs text-white/30">
+            +{dataset.tags.length - 3}
           </span>
         )}
       </div>
 
-      <div className="mt-6 space-y-3">
-        <div className="flex items-center justify-between text-xs uppercase tracking-[0.25em] text-white/50">
-          Schema preview
-          <span>{dataset.columnCount} columns</span>
+      {/* Schema Preview */}
+      <div className="mt-5 rounded-xl border border-white/5 bg-white/[0.02] p-3">
+        <div className="flex items-center justify-between text-xs text-white/40 mb-2">
+          <span className="uppercase tracking-wider">Schema</span>
+          <span className="flex items-center gap-1">
+            <Layers className="h-3 w-3" />
+            {dataset.columnCount} cols
+          </span>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {dataset.schema.slice(0, compact ? 2 : 3).map((column) => (
-            <div key={column.name} className="flex items-center justify-between px-1 py-2 text-sm">
-              <span className="font-medium text-white">{column.name}</span>
-              <span className="text-xs text-white/40">{column.type}</span>
+            <div key={column.name} className="flex items-center justify-between text-sm">
+              <span className="font-medium text-white/70">{column.name}</span>
+              <span className="text-xs font-mono text-white/30">{column.type}</span>
             </div>
           ))}
           {dataset.schema.length > (compact ? 2 : 3) && (
-            <p className="text-xs text-white/45">+ more columns</p>
+            <p className="text-xs text-white/30 pt-1">+ {dataset.schema.length - (compact ? 2 : 3)} more</p>
           )}
         </div>
       </div>
 
-      <div className="mt-6 grid gap-2 text-sm text-muted-foreground">
-        <div className="flex items-center justify-between text-white/55">
-          <span>Price / row</span>
-          <span className="font-mono text-base text-white">
-            {dataset.pricePerRow.toFixed(3)} SOL
+      {/* Price & Meta */}
+      <div className="mt-5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Coins className="h-4 w-4 text-emerald-400/70" />
+          <span className="text-lg font-semibold text-white">
+            {dataset.pricePerRow.toFixed(3)}
           </span>
+          <span className="text-sm text-white/40">SOL/row</span>
         </div>
-        <div className="flex items-center justify-between text-white/55">
-          <span>Updated</span>
-          <span className="font-semibold text-white">{dataset.updatedAt}</span>
-        </div>
+        <span className="text-xs text-white/30">{dataset.updatedAt}</span>
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      {/* Actions */}
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
         <Button
-          variant="outline"
+          className="btn-secondary h-10 text-sm"
           asChild
-          className="w-full justify-center gap-2 rounded-full border-white/20 text-white/80 transition hover:text-white"
         >
           <Link href={`/agent?attach=${dataset.slug}`}>
             <Plus className="h-4 w-4" />
@@ -104,8 +115,8 @@ export function DatasetCard({
           </Link>
         </Button>
         <Button
+          className="btn-primary h-10 text-sm"
           asChild
-          className="w-full justify-center gap-2 rounded-full bg-gradient-to-r from-blue-500 to-blue-400 text-white shadow-glow transition hover:-translate-y-0.5"
         >
           <Link href={`/datasets/${dataset.slug}`}>
             View details
@@ -116,4 +127,3 @@ export function DatasetCard({
     </div>
   );
 }
-

@@ -11,6 +11,8 @@ import {
   Wallet2,
   X,
   ChevronDown,
+  Bot,
+  Database,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -23,7 +25,6 @@ import {
 } from "@/components/ui/chat-bubble";
 import { ChatInput } from "@/components/ui/chat-input";
 import { ChatMessageList } from "@/components/ui/chat-message-list";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 type Message = {
@@ -63,61 +64,61 @@ function CheckoutModal({
   if (!open) return null;
   const total = totalRows * pricePerRow;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur">
-      <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-black/90 p-8 shadow-[0_40px_120px_rgba(0,0,0,0.65)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+      <div className="w-full max-w-xl glass-panel p-8 mx-4">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.4em] text-primary">
-              Checkout
-            </p>
+            <p className="section-label">Checkout</p>
             <h2 className="mt-2 text-3xl font-semibold text-white">
               Purchase slice
             </h2>
           </div>
           <button
-            className="rounded-full border border-white/20 p-2 text-white/60 hover:text-white"
+            className="rounded-full border border-white/10 bg-white/[0.03] p-2 text-white/60 hover:text-white hover:bg-white/[0.06] transition-colors"
             onClick={onClose}
             aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="mt-6 space-y-4 text-sm text-white/80">
-          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4">
-            <span>Rows requested</span>
+        <div className="mt-6 space-y-4">
+          <div className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+            <span className="text-white/60">Rows requested</span>
             <span className="text-xl font-semibold text-white">
               {totalRows.toLocaleString()}
             </span>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <p className="text-xs uppercase tracking-[0.4em] text-white/40">
+          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+            <p className="text-xs uppercase tracking-wider text-white/40 mb-3">
               Datasets
             </p>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               {selected.map((slug) => {
                 const dataset = datasets.find((d) => d.slug === slug);
                 return (
-                  <Badge key={slug} className="bg-white/20 text-white">
+                  <span key={slug} className="rounded-full bg-cyan-500/20 px-3 py-1 text-sm font-medium text-cyan-400">
                     {dataset?.name ?? slug}
-                  </Badge>
+                  </span>
                 );
               })}
             </div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-blue-500/30 to-cyan-500/30 p-4 text-white">
-            <div className="flex items-center justify-between text-lg font-semibold">
-              <span>Total</span>
-              <span>{total.toFixed(3)} SOL</span>
+          <div className="rounded-2xl bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-white/10 p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-lg font-semibold text-white">Total</span>
+              <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
+                {total.toFixed(3)} SOL
+              </span>
             </div>
-            <p className="mt-1 text-xs text-white/80">
+            <p className="mt-1 text-xs text-white/50">
               {totalRows} rows × {pricePerRow.toFixed(4)} SOL
             </p>
           </div>
-          <Button className="h-14 gap-2 rounded-full bg-white text-slate-900">
-            <Wallet2 className="h-4 w-4" />
+          <Button className="w-full h-14 rounded-full bg-white text-slate-900 font-semibold hover:bg-white/90">
+            <Wallet2 className="h-4 w-4 mr-2" />
             Approve in wallet
           </Button>
-          <p className="text-xs text-white/60">
+          <p className="text-xs text-white/40 text-center">
             Data generation happens server-side only after the transaction has
             settled on-chain.
           </p>
@@ -182,58 +183,74 @@ function AgentPageContent() {
   };
 
   return (
-    <div className="container py-16">
+    <div className="py-8">
+      {/* Hero */}
+      <div className="mb-8 space-y-2">
+        <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-4 py-1.5">
+          <Bot className="h-3.5 w-3.5 text-violet-400" />
+          <span className="text-xs font-medium text-violet-400">Agent Workspace</span>
+        </div>
+        <h1 className="text-3xl font-semibold tracking-tight text-white">
+          Orchestrate your data slice
+        </h1>
+        <p className="text-white/50">
+          Attach datasets, describe your needs, and let the agent build your projection.
+        </p>
+      </div>
+
       <div className="flex flex-col gap-8 xl:flex-row">
-        <div className="space-y-8 xl:w-[40%]">
-          <div className="space-y-6 rounded-3xl border border-white/10 bg-black/40 p-6">
+        {/* Left Sidebar */}
+        <div className="space-y-6 xl:w-[380px] shrink-0">
+          {/* Context Window */}
+          <div className="glass-panel p-6 space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs uppercase tracking-[0.4em] text-primary">
-                  Context window
-                </p>
-                <h1 className="mt-2 text-3xl font-semibold text-white">
+                <p className="section-label">Context window</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">
                   Attached datasets
-                </h1>
+                </h2>
               </div>
-              <Button
-                variant="outline"
-                className="gap-2 rounded-full border-white/20 text-white"
-                asChild
-              >
+              <Button className="btn-secondary h-9 text-xs" asChild>
                 <Link href="/datasets">
-                  + Add data
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
                 </Link>
               </Button>
             </div>
-            <div className="mt-6 space-y-3">
+
+            <div className="space-y-2">
               {selectedDatasets.length === 0 && (
-                <div className="rounded-2xl border border-dashed border-white/20 p-4 text-sm text-muted-foreground">
-                  No datasets attached. Add one to start orchestrating slices.
+                <div className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/40 text-center">
+                  No datasets attached yet.
                 </div>
               )}
               {selectedDatasets.map((slug) => {
                 const dataset = datasets.find((d) => d.slug === slug);
                 if (!dataset) return null;
                 return (
-                  <div key={slug} className="rounded-2xl bg-white/[0.03] p-4">
-                    <div className="flex items-start justify-between text-sm text-white">
-                      <div>
-                        <p className="font-semibold">{dataset.name}</p>
-                        <p className="text-xs uppercase tracking-[0.3em] text-white/50">
-                          {dataset.columnCount} columns
-                        </p>
+                  <div key={slug} className="glass-card p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 border border-white/10">
+                          <Database className="h-4 w-4 text-cyan-400" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-white text-sm">{dataset.name}</p>
+                          <p className="text-xs text-white/40">
+                            {dataset.columnCount} columns
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         <button
-                          className="text-white/50 hover:text-white"
+                          className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/[0.05] transition-colors"
                           onClick={() => handleRemoveDataset(slug)}
                           aria-label="Remove dataset"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          className="text-white/50 hover:text-white"
+                          className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/[0.05] transition-colors"
                           onClick={() =>
                             setExpandedDataset((prev) =>
                               prev === slug ? null : slug
@@ -243,7 +260,7 @@ function AgentPageContent() {
                         >
                           <ChevronDown
                             className={cn(
-                              "h-4 w-4 transition",
+                              "h-3.5 w-3.5 transition-transform",
                               expandedDataset === slug && "rotate-180"
                             )}
                           />
@@ -251,23 +268,19 @@ function AgentPageContent() {
                       </div>
                     </div>
                     {expandedDataset === slug && (
-                      <div className="mt-3 space-y-2 text-xs text-white/65">
+                      <div className="mt-3 space-y-1.5 pl-12">
                         {dataset.schema.slice(0, 3).map((column) => (
                           <div
                             key={column.name}
-                            className="flex items-center justify-between rounded-xl bg-black/30 px-3 py-2"
+                            className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-xs"
                           >
-                            <div>
-                              <p className="font-medium">{column.name}</p>
-                              <p className="text-[10px] uppercase tracking-[0.2em] text-white/40">
-                                {column.type}
-                              </p>
-                            </div>
+                            <span className="text-white/70">{column.name}</span>
+                            <span className="font-mono text-white/30">{column.type}</span>
                           </div>
                         ))}
                         {dataset.schema.length > 3 && (
-                          <p className="text-[10px] text-white/40">
-                            + more columns
+                          <p className="text-xs text-white/30 pl-3">
+                            + {dataset.schema.length - 3} more
                           </p>
                         )}
                       </div>
@@ -278,84 +291,89 @@ function AgentPageContent() {
             </div>
           </div>
 
+          {/* Slice Preview */}
           <div
             className={cn(
-              "rounded-3xl border border-white/10 bg-black/30 p-6 transition",
-              sliceHighlight && "ring-1 ring-primary/40"
+              "glass-panel p-6 space-y-4 transition-all duration-300",
+              sliceHighlight && "ring-2 ring-cyan-500/30"
             )}
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs uppercase tracking-[0.4em] text-primary">
-                  Slice preview
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-white">
+                <p className="section-label">Slice preview</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">
                   Columns included
                 </h2>
               </div>
-              <Badge variant="outline" className="border-white/30">
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-xs text-white/50">
                 schema only
-              </Badge>
+              </span>
             </div>
-            <div className="mt-4 space-y-2">
+            <div className="space-y-2">
               {slicePreview.map((entry) => (
                 <div
                   key={entry.column}
-                  className="flex items-center justify-between rounded-2xl bg-white/[0.04] px-3 py-3 text-sm text-white"
+                  className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-3"
                 >
                   <div>
-                    <p className="font-medium">{entry.column}</p>
-                    <p className="text-xs text-white/50">{entry.dataset}</p>
+                    <p className="font-medium text-white/80 text-sm">{entry.column}</p>
+                    <p className="text-xs text-white/40">{entry.dataset}</p>
                   </div>
-                  <span className="text-xs text-white/40">{entry.type}</span>
+                  <span className="text-xs font-mono text-white/30">{entry.type}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="space-y-4 rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-transparent p-6 text-white shadow-[0_20px_60px_rgba(15,23,42,0.4)]">
-            <div className="flex items-center justify-between text-sm text-white/70">
-              <span>Rows requested</span>
-              <span className="font-semibold text-white">
-                {estimatedRows.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm text-white/70">
-              <span>Datasets included</span>
-              <span className="font-semibold text-white">
-                {selectedDatasets.length}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-2xl font-semibold text-white">
-              <span>Est. total</span>
-              <span>{totalCost.toFixed(3)} SOL</span>
+          {/* Purchase Card */}
+          <div className="glass-panel p-6 space-y-4 bg-gradient-to-br from-emerald-500/10 via-transparent to-cyan-500/10">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/50">Rows requested</span>
+                <span className="font-medium text-white">
+                  {estimatedRows.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/50">Datasets included</span>
+                <span className="font-medium text-white">
+                  {selectedDatasets.length}
+                </span>
+              </div>
+              <div className="divider" />
+              <div className="flex items-center justify-between">
+                <span className="text-lg font-semibold text-white">Est. total</span>
+                <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
+                  {totalCost.toFixed(3)} SOL
+                </span>
+              </div>
             </div>
             <Button
-              className="mt-2 h-12 gap-2 rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 text-slate-950 shadow-glow"
+              className="w-full h-12 rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold shadow-[0_4px_20px_rgba(16,185,129,0.3)] hover:shadow-[0_8px_30px_rgba(16,185,129,0.4)] transition-all hover:-translate-y-0.5"
               onClick={() => setCheckoutOpen(true)}
             >
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-4 w-4 mr-2" />
               Purchase slice
             </Button>
           </div>
         </div>
 
-        <div className="flex-1 rounded-3xl border border-white/10 bg-black/40 p-6">
-          <div className="flex items-center justify-between">
+        {/* Chat Area */}
+        <div className="flex-1 glass-panel p-6 flex flex-col">
+          <div className="flex items-center justify-between mb-6">
             <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-primary">
-                Agent Chat
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">
-                “What slice do you need?”
+              <p className="section-label">Agent chat</p>
+              <h2 className="mt-1 text-xl font-semibold text-white">
+                "What slice do you need?"
               </h2>
             </div>
-            <Badge variant="outline" className="border-white/30">
+            <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-white/50">
               schema access only
-            </Badge>
+            </span>
           </div>
-          <div className="mt-6 flex h-[500px] flex-col overflow-hidden rounded-2xl border border-white/5 bg-black/60">
-            <ChatMessageList className="flex-1">
+
+          <div className="flex-1 flex flex-col rounded-2xl border border-white/5 bg-black/40 overflow-hidden min-h-[500px]">
+            <ChatMessageList className="flex-1 p-4">
               {messages.map((message) => (
                 <ChatBubble
                   key={message.id}
@@ -388,24 +406,25 @@ function AgentPageContent() {
                 </ChatBubble>
               )}
             </ChatMessageList>
+
             <div className="border-t border-white/5 p-4">
               <form
                 onSubmit={handleSubmit}
-                className="space-y-3 rounded-2xl border border-white/10 bg-black/70 p-4"
+                className="rounded-xl border border-white/10 bg-white/[0.02] p-3"
               >
                 <ChatInput
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="“Get me 500 positive churn rows and join age + salary.”"
-                  className="min-h-16 resize-none border-0 bg-transparent px-0 text-white text-base"
+                  placeholder="Get me 500 positive churn rows and join age + salary..."
+                  className="min-h-[60px] resize-none border-0 bg-transparent px-1 text-white text-sm placeholder:text-white/30"
                 />
-                <div className="flex items-center justify-between">
-                  <div className="flex gap-2">
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
+                  <div className="flex gap-1.5">
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="rounded-full border border-white/10 text-white/70"
+                      className="h-9 w-9 rounded-lg border border-white/10 text-white/50 hover:text-white hover:bg-white/[0.05]"
                     >
                       <Paperclip className="h-4 w-4" />
                     </Button>
@@ -413,7 +432,7 @@ function AgentPageContent() {
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="rounded-full border border-white/10 text-white/70"
+                      className="h-9 w-9 rounded-lg border border-white/10 text-white/50 hover:text-white hover:bg-white/[0.05]"
                     >
                       <Wallet2 className="h-4 w-4" />
                     </Button>
@@ -421,7 +440,7 @@ function AgentPageContent() {
                   <Button
                     type="submit"
                     size="sm"
-                    className="gap-2 rounded-full bg-primary px-5 text-white"
+                    className="btn-primary h-9 px-5"
                     disabled={isLoading}
                   >
                     {isLoading ? (
@@ -429,7 +448,7 @@ function AgentPageContent() {
                     ) : (
                       <>
                         Send
-                        <CornerDownLeft className="h-3.5 w-3.5" />
+                        <CornerDownLeft className="h-3.5 w-3.5 ml-1.5" />
                       </>
                     )}
                   </Button>
@@ -439,6 +458,7 @@ function AgentPageContent() {
           </div>
         </div>
       </div>
+
       <CheckoutModal
         open={checkoutOpen}
         onClose={() => setCheckoutOpen(false)}
@@ -454,9 +474,11 @@ export default function AgentPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-[50vh] items-center justify-center text-white/70">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          Loading agent experience...
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="flex items-center gap-3 text-white/60">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading agent experience...
+          </div>
         </div>
       }
     >
