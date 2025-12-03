@@ -45,45 +45,48 @@ export function DatasetCard({
         </div>
       </div>
 
-      <div className="mt-6 flex flex-wrap gap-2">
-        {dataset.tags.map((tag) => (
-          <Badge key={tag} className="border border-white/10 bg-white/5">
+      <div className="mt-6 flex flex-wrap gap-2 text-sm">
+        {dataset.tags.slice(0, 3).map((tag) => (
+          <span
+            key={tag}
+            className="rounded-full border border-white/15 px-3 py-1 text-white/70"
+          >
             {tag}
-          </Badge>
+          </span>
         ))}
+        {dataset.tags.length > 3 && (
+          <span className="text-xs uppercase tracking-[0.2em] text-white/40">
+            +{dataset.tags.length - 3} more
+          </span>
+        )}
       </div>
 
-      <div className="mt-6 grid gap-3 rounded-2xl border border-white/5 bg-black/30 p-4">
-        <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-white/60">
-          Schema Preview
+      <div className="mt-6 space-y-3">
+        <div className="flex items-center justify-between text-xs uppercase tracking-[0.25em] text-white/50">
+          Schema preview
           <span>{dataset.columnCount} columns</span>
         </div>
         <div className="space-y-2">
           {dataset.schema.slice(0, compact ? 2 : 3).map((column) => (
-            <div
-              key={column.name}
-              className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2 text-sm"
-            >
-              <span className="font-medium text-white/80">{column.name}</span>
-              <span className="font-mono text-xs text-primary/70">
-                {column.type}
-              </span>
+            <div key={column.name} className="flex items-center justify-between px-1 py-2 text-sm">
+              <span className="font-medium text-white">{column.name}</span>
+              <span className="text-xs text-white/40">{column.type}</span>
             </div>
           ))}
           {dataset.schema.length > (compact ? 2 : 3) && (
-            <p className="text-xs text-white/50">+ more columns</p>
+            <p className="text-xs text-white/45">+ more columns</p>
           )}
         </div>
       </div>
 
       <div className="mt-6 grid gap-2 text-sm text-muted-foreground">
-        <div className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.03] px-3 py-2">
+        <div className="flex items-center justify-between text-white/55">
           <span>Price / row</span>
-          <span className="font-semibold text-white">
+          <span className="font-mono text-base text-white">
             {dataset.pricePerRow.toFixed(3)} SOL
           </span>
         </div>
-        <div className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.03] px-3 py-2">
+        <div className="flex items-center justify-between text-white/55">
           <span>Updated</span>
           <span className="font-semibold text-white">{dataset.updatedAt}</span>
         </div>
