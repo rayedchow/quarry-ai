@@ -143,7 +143,7 @@ function AgentPageContent() {
   const pricePerRow = 0.002;
   const totalCost = useMemo(
     () => selectedDatasets.length * estimatedRows * pricePerRow,
-    [selectedDatasets],
+    [selectedDatasets]
   );
 
   const handleRemoveDataset = (slug: string) => {
@@ -419,4 +419,3 @@ export default function AgentPage() {
     </Suspense>
   );
 }
-

@@ -119,7 +119,7 @@ function Dock({
         }}
         className={cn(
           "mx-auto flex w-fit gap-4 rounded-2xl bg-gray-50/90 px-4 pb-1 dark:bg-neutral-900/90",
-          className,
+          className
         )}
         style={{ height: panelHeight }}
         role="toolbar"
@@ -148,7 +148,7 @@ function DockItem({ children, className }: DockItemProps) {
   const widthTransform = useTransform(
     mouseDistance,
     [-distance, 0, distance],
-    [40, magnification, 40],
+    [40, magnification, 40]
   );
 
   const width = useSpring(widthTransform, spring);
@@ -163,7 +163,7 @@ function DockItem({ children, className }: DockItemProps) {
       onBlur={() => isHovered.set(0)}
       className={cn(
         "relative inline-flex items-center justify-center",
-        className,
+        className
       )}
       tabIndex={0}
       role="button"
@@ -206,7 +206,7 @@ function DockLabel({ children, className, ...rest }: DockLabelProps) {
           transition={{ duration: 0.2 }}
           className={cn(
             "absolute -top-6 left-1/2 w-fit whitespace-pre rounded-md border border-gray-200 bg-gray-100 px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-900 dark:bg-neutral-800 dark:text-white",
-            className,
+            className
           )}
           role="tooltip"
           style={{ x: "-50%" }}
@@ -235,4 +235,3 @@ function DockIcon({ children, className, ...rest }: DockIconProps) {
 }
 
 export { Dock, DockIcon, DockItem, DockLabel };
-
