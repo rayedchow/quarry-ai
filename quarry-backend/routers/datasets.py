@@ -58,6 +58,7 @@ async def create_dataset(
     file: UploadFile = File(...),
     name: str = Form(...),
     publisher: str = Form(...),
+    publisher_wallet: str = Form(...),
     description: str = Form(default=""),
     summary: str = Form(default=""),
     tags: str = Form(default=""),
@@ -97,10 +98,18 @@ async def create_dataset(
     # Parse tags
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
+    # Validate publisher wallet address
+    if not publisher_wallet or len(publisher_wallet) < 32:
+        raise HTTPException(
+            status_code=400,
+            detail="Valid publisher wallet address required (Solana address)"
+        )
+
     # Create dataset metadata
     dataset_data = DatasetCreate(
         name=name,
         publisher=publisher,
+        publisher_wallet=publisher_wallet,
         description=description,
         summary=summary,
         tags=tag_list,

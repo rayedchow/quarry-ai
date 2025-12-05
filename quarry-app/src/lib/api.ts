@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = "http://localhost:8000";
 
 export type ColumnSchema = {
   name: string;
@@ -6,11 +6,53 @@ export type ColumnSchema = {
   semantic: string;
 };
 
+export type ReputationBadge = {
+  type: string;
+  level: string;
+  label: string;
+  icon: string;
+};
+
+export type AttestationInfo = {
+  id: string;
+  address: string;
+  tx_signature: string;
+  issued_at: string;
+  expires_at: string | null;
+  schema: string;
+};
+
+export type QAReportSummary = {
+  ipfs_cid: string;
+  summary: {
+    completeness: string;
+    duplicates: string;
+    pii_risk: string;
+    freshness: string;
+  };
+};
+
+export type DatasetReputation = {
+  dataset_id: string;
+  dataset_name: string;
+  dataset_version: string;
+  dataset_version_pda: string;
+  processed_at: string;
+  quality_score: number;
+  qa_report: QAReportSummary;
+  attestations: {
+    quality: AttestationInfo;
+    freshness: AttestationInfo;
+  };
+  badges: ReputationBadge[];
+};
+
 export type Dataset = {
   id: string;
   slug: string;
   name: string;
   publisher: string;
+  publisherWallet?: string;
   tags: string[];
   description: string;
   summary: string;
@@ -20,6 +62,7 @@ export type Dataset = {
   updatedAt: string;
   image: string;
   schema: ColumnSchema[];
+  reputation?: DatasetReputation;
 };
 
 export type DatasetListResponse = {
@@ -96,6 +139,7 @@ export type PaymentRequest = {
 export type PaymentConfirmation = {
   query_id: string;
   transaction_signature: string;
+  payer_wallet?: string;
 };
 
 class ApiClient {
@@ -145,11 +189,93 @@ class ApiClient {
   }
 
   async getDataset(slug: string): Promise<Dataset> {
+    // Reputation is now included in the dataset response
     return this.fetch<Dataset>(`/api/datasets/${slug}`);
   }
 
   async getTags(): Promise<TagsResponse> {
     return this.fetch<TagsResponse>("/api/datasets/tags");
+  }
+
+  // Reputation APIs
+  async getDatasetReputation(datasetId: string, version: string = "v1"): Promise<DatasetReputation> {
+    return this.fetch<DatasetReputation>(`/api/reputation/dataset/${datasetId}?version=${version}`);
+  }
+
+  async verifyAttestation(attestationId: string): Promise<any> {
+    return this.fetch<any>(`/api/reputation/attestation/${attestationId}/verify`);
+  }
+
+  async getIPFSContent(cid: string): Promise<any> {
+    return this.fetch<any>(`/api/reputation/ipfs/${cid}`);
+  }
+
+  async createUsageReceipt(
+    reviewerWallet: string,
+    datasetId: string,
+    datasetVersion: string,
+    txSignature: string,
+    rowsAccessed: number,
+    costPaid: number
+  ): Promise<any> {
+    return this.fetch<any>("/api/reputation/usage-receipt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reviewer_wallet: reviewerWallet,
+        dataset_id: datasetId,
+        dataset_version: datasetVersion,
+        tx_signature: txSignature,
+        rows_accessed: rowsAccessed,
+        cost_paid: costPaid,
+      }),
+    });
+  }
+
+  async getReputationSchemas(): Promise<any> {
+    return this.fetch<any>("/api/reputation/schemas");
+  }
+
+  // Review APIs
+  async createReview(
+    datasetId: string,
+    reviewerWallet: string,
+    rating: number,
+    reviewText: string,
+    usageReceiptAttestation: string,
+    datasetVersion: string = "v1"
+  ): Promise<any> {
+    return this.fetch<any>("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dataset_id: datasetId,
+        dataset_version: datasetVersion,
+        rating: rating,
+        review_text: reviewText,
+        reviewer_wallet: reviewerWallet,
+        usage_receipt_attestation: usageReceiptAttestation,
+      }),
+    });
+  }
+
+  async getDatasetReviews(datasetId: string, version: string = "v1", limit: number = 50, offset: number = 0): Promise<any> {
+    return this.fetch<any>(`/api/reviews/dataset/${datasetId}?version=${version}&limit=${limit}&offset=${offset}`);
+  }
+
+  async checkReviewEligibility(datasetId: string, walletAddress: string): Promise<any> {
+    return this.fetch<any>(`/api/reviews/check-eligibility/${datasetId}/${walletAddress}`);
+  }
+
+  async markReviewHelpful(reviewId: string, voterWallet: string): Promise<any> {
+    return this.fetch<any>("/api/reviews/helpful", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        review_id: reviewId,
+        voter_wallet: voterWallet,
+      }),
+    });
   }
 
   async createDataset(formData: FormData): Promise<UploadResponse> {

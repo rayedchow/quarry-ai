@@ -16,6 +16,7 @@ class DatasetBase(BaseModel):
 
     name: str
     publisher: str
+    publisher_wallet: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     description: str = ""
     summary: str = ""
@@ -34,6 +35,7 @@ class DatasetUpdate(BaseModel):
 
     name: Optional[str] = None
     publisher: Optional[str] = None
+    publisher_wallet: Optional[str] = None
     tags: Optional[list[str]] = None
     description: Optional[str] = None
     summary: Optional[str] = None
@@ -53,6 +55,7 @@ class Dataset(DatasetBase):
     schema_columns: list[ColumnSchema] = Field(default_factory=list)
     parquet_path: Optional[str] = None
     original_filename: Optional[str] = None
+    reputation_data: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -65,6 +68,7 @@ class DatasetResponse(BaseModel):
     slug: str
     name: str
     publisher: str
+    publisherWallet: Optional[str] = None
     tags: list[str]
     description: str
     summary: str
@@ -74,6 +78,7 @@ class DatasetResponse(BaseModel):
     updatedAt: str
     image: str
     schema_: list[ColumnSchema] = Field(alias="schema")
+    reputation: Optional[dict] = None
 
     model_config = {"populate_by_name": True}
 
@@ -108,6 +113,7 @@ class DatasetResponse(BaseModel):
             slug=dataset.slug,
             name=dataset.name,
             publisher=dataset.publisher,
+            publisherWallet=dataset.publisher_wallet,
             tags=dataset.tags,
             description=dataset.description,
             summary=dataset.summary,
@@ -117,6 +123,7 @@ class DatasetResponse(BaseModel):
             updatedAt=updated_str,
             image=f"https://picsum.photos/seed/{dataset.slug}/1400/800",
             schema_=dataset.schema_columns,
+            reputation=dataset.reputation_data,
         )
 
 
@@ -209,3 +216,4 @@ class PaymentConfirmation(BaseModel):
 
     query_id: str
     transaction_signature: str
+    payer_wallet: Optional[str] = None  # Wallet that made the payment

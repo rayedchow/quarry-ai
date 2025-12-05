@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
 import duckdb
@@ -25,6 +25,7 @@ class DuckDBManager:
                     slug VARCHAR UNIQUE NOT NULL,
                     name VARCHAR NOT NULL,
                     publisher VARCHAR NOT NULL,
+                    publisher_wallet VARCHAR,
                     tags JSON,
                     description TEXT,
                     summary TEXT,
@@ -36,13 +37,52 @@ class DuckDBManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     schema_columns JSON,
                     parquet_path VARCHAR,
-                    original_filename VARCHAR
+                    original_filename VARCHAR,
+                    reputation_data JSON
                 )
             """)
 
             # Create index on slug for faster lookups
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_datasets_slug ON datasets(slug)
+            """)
+
+            # Create reviews table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS reviews (
+                    id VARCHAR PRIMARY KEY,
+                    dataset_id VARCHAR NOT NULL,
+                    dataset_version VARCHAR DEFAULT 'v1',
+                    reviewer_wallet VARCHAR NOT NULL,
+                    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+                    review_text TEXT NOT NULL,
+                    review_text_cid VARCHAR NOT NULL,
+                    usage_receipt_attestation VARCHAR NOT NULL,
+                    review_attestation_id VARCHAR NOT NULL,
+                    review_attestation_address VARCHAR NOT NULL,
+                    helpful_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (dataset_id) REFERENCES datasets(id)
+                )
+            """)
+
+            # Create indexes for reviews
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reviews_dataset ON reviews(dataset_id, dataset_version)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reviews_wallet ON reviews(reviewer_wallet)
+            """)
+
+            # Create helpful votes table (prevent double voting)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS review_helpful_votes (
+                    review_id VARCHAR NOT NULL,
+                    voter_wallet VARCHAR NOT NULL,
+                    voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (review_id, voter_wallet),
+                    FOREIGN KEY (review_id) REFERENCES reviews(id)
+                )
             """)
 
     @contextmanager
@@ -255,6 +295,11 @@ class DuckDBManager:
         elif data.get("schema_columns") is None:
             data["schema_columns"] = []
 
+        if isinstance(data.get("reputation_data"), str):
+            data["reputation_data"] = json.loads(data["reputation_data"])
+        elif data.get("reputation_data") is None:
+            data["reputation_data"] = None
+
         return Dataset(**data)
 
     def register_parquet_view(self, dataset_slug: str, parquet_path: str) -> bool:
@@ -309,6 +354,181 @@ class DuckDBManager:
 
             rows = [list(row) for row in result]
             return col_names, rows, total
+
+    def update_dataset_reputation(self, dataset_id: str, reputation_data: dict) -> bool:
+        """
+        Store reputation data for a dataset.
+
+        Args:
+            dataset_id: Dataset ID
+            reputation_data: Reputation data dictionary
+
+        Returns:
+            True if successful
+        """
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE datasets 
+                SET reputation_data = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                [json.dumps(reputation_data), dataset_id],
+            )
+            return True
+
+    def get_dataset_reputation(self, dataset_id: str) -> Optional[dict]:
+        """
+        Get reputation data for a dataset.
+
+        Args:
+            dataset_id: Dataset ID
+
+        Returns:
+            Reputation data dictionary or None
+        """
+        with self.get_connection() as conn:
+            result = conn.execute(
+                "SELECT reputation_data FROM datasets WHERE id = ?", [dataset_id]
+            ).fetchone()
+
+            if result is None or result[0] is None:
+                return None
+
+            return json.loads(result[0])
+
+    def create_review(self, review_data: dict) -> bool:
+        """
+        Create a new review.
+
+        Args:
+            review_data: Review data dictionary
+
+        Returns:
+            True if successful
+        """
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO reviews (
+                    id, dataset_id, dataset_version, reviewer_wallet, rating,
+                    review_text, review_text_cid, usage_receipt_attestation,
+                    review_attestation_id, review_attestation_address, 
+                    helpful_count, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    review_data["id"],
+                    review_data["dataset_id"],
+                    review_data["dataset_version"],
+                    review_data["reviewer_wallet"],
+                    review_data["rating"],
+                    review_data["review_text"],
+                    review_data["review_text_cid"],
+                    review_data["usage_receipt_attestation"],
+                    review_data["review_attestation_id"],
+                    review_data["review_attestation_address"],
+                    review_data["helpful_count"],
+                    review_data["created_at"],
+                ],
+            )
+            return True
+
+    def get_reviews_for_dataset(
+        self, dataset_id: str, dataset_version: str, limit: int = 50, offset: int = 0
+    ) -> List[dict]:
+        """Get reviews for a dataset."""
+        with self.get_connection() as conn:
+            results = conn.execute(
+                """
+                SELECT * FROM reviews
+                WHERE dataset_id = ? AND dataset_version = ?
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                [dataset_id, dataset_version, limit, offset],
+            ).fetchall()
+
+            reviews = []
+            for row in results:
+                columns = [col[0] for col in conn.description]
+                review_dict = dict(zip(columns, row))
+                reviews.append(review_dict)
+
+            return reviews
+
+    def count_reviews_for_dataset(self, dataset_id: str, dataset_version: str) -> int:
+        """Count total reviews for a dataset."""
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+                SELECT COUNT(*) FROM reviews
+                WHERE dataset_id = ? AND dataset_version = ?
+                """,
+                [dataset_id, dataset_version],
+            ).fetchone()
+            return result[0] if result else 0
+
+    def get_review_by_wallet_and_dataset(
+        self, reviewer_wallet: str, dataset_id: str, dataset_version: str
+    ) -> Optional[dict]:
+        """Check if a user already reviewed a dataset."""
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+                SELECT * FROM reviews
+                WHERE reviewer_wallet = ? AND dataset_id = ? AND dataset_version = ?
+                """,
+                [reviewer_wallet, dataset_id, dataset_version],
+            ).fetchone()
+
+            if result is None:
+                return None
+
+            columns = [col[0] for col in conn.description]
+            return dict(zip(columns, result))
+
+    def add_helpful_vote(self, review_id: str, voter_wallet: str) -> bool:
+        """Record a helpful vote."""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO review_helpful_votes (review_id, voter_wallet)
+                VALUES (?, ?)
+                """,
+                [review_id, voter_wallet],
+            )
+            return True
+
+    def get_helpful_vote(self, review_id: str, voter_wallet: str) -> bool:
+        """Check if user already voted helpful."""
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+                SELECT COUNT(*) FROM review_helpful_votes
+                WHERE review_id = ? AND voter_wallet = ?
+                """,
+                [review_id, voter_wallet],
+            ).fetchone()
+            return result[0] > 0 if result else False
+
+    def increment_review_helpful_count(self, review_id: str) -> int:
+        """Increment helpful count and return new count."""
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE reviews
+                SET helpful_count = helpful_count + 1
+                WHERE id = ?
+                """,
+                [review_id],
+            )
+
+            result = conn.execute(
+                "SELECT helpful_count FROM reviews WHERE id = ?", [review_id]
+            ).fetchone()
+
+            return result[0] if result else 0
 
 
 # Global database instance

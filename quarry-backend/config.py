@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     solana_rpc_url: str = "https://convincing-delicate-frog.solana-mainnet.quiknode.pro/4dec0b3b4fc568d1c31eafce58fe7effa3bd026a/"
     payment_wallet_address: str = ""  # Your Solana wallet address to receive payments
 
+    # IPFS Configuration
+    ipfs_api: str = "/ip4/127.0.0.1/tcp/5001"  # Local IPFS node
+    ipfs_gateway: str = ""  # Optional: Infura or other IPFS gateway
+
+    # Solana Attestation Service (SAS)
+    sas_authority_key: str = ""  # Base58 encoded secret key for SAS authority
+    sas_program_id: str = (
+        "SAS1111111111111111111111111111111111111111"  # SAS program ID
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

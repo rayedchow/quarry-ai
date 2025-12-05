@@ -19,6 +19,7 @@ from models import (
     ColumnSchema,
 )
 from services.file_converter import file_converter
+from services.reputation_service import reputation_service
 
 
 class DatasetService:
@@ -100,6 +101,28 @@ class DatasetService:
 
         # Save to database
         db.create_dataset(dataset)
+
+        # Process reputation in background if parquet file exists
+        if parquet_path:
+            try:
+                # Run reputation processing asynchronously
+                # In production, this should be a background task
+                import logging
+                logging.info(f"Starting reputation processing for {dataset_id}")
+                await reputation_service.process_dataset_reputation(
+                    dataset_id=dataset_id,
+                    dataset_name=data.name,
+                    dataset_version="v1",
+                    parquet_path=parquet_path,
+                    publisher_wallet=None  # TODO: Get from request context
+                )
+                logging.info(f"Reputation processing completed for {dataset_id}")
+            except Exception as e:
+                # Log error but don't fail dataset creation
+                import logging
+                import traceback
+                logging.error(f"Failed to process reputation for {dataset_id}: {e}")
+                logging.error(traceback.format_exc())
 
         return DatasetResponse.from_dataset(dataset)
 

@@ -33,6 +33,7 @@ export default function PublishDatasetPage() {
   // Form fields
   const [name, setName] = useState("");
   const [publisher, setPublisher] = useState("");
+  const [publisherWallet, setPublisherWallet] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
   const [pricePerRow, setPricePerRow] = useState("0.001");
@@ -116,6 +117,7 @@ export default function PublishDatasetPage() {
       formData.append("file", selectedFile);
       formData.append("name", name.trim());
       formData.append("publisher", publisher.trim());
+      formData.append("publisher_wallet", publisherWallet.trim());
       formData.append("description", description.trim());
       formData.append("tags", tags);
       formData.append("price_per_row", pricePerRow);
@@ -342,6 +344,25 @@ export default function PublishDatasetPage() {
                   placeholder="e.g., Your Organization Name"
                   className="input-field"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-white/70 flex items-center gap-2">
+                  Publisher Wallet <span className="text-red-400">*</span>
+                  <span className="text-xs text-cyan-400 font-normal">(Receives payments)</span>
+                </label>
+                <input
+                  type="text"
+                  value={publisherWallet}
+                  onChange={(e) => setPublisherWallet(e.target.value)}
+                  placeholder="Your Solana wallet address (e.g., 7xKxD...abc123)"
+                  className="input-field font-mono text-sm"
+                  required
+                />
+                <p className="text-xs text-white/40 flex items-start gap-1.5">
+                  <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                  <span>Payments for dataset queries will be sent directly to this wallet address</span>
+                </p>
               </div>
 
               <div className="space-y-2">

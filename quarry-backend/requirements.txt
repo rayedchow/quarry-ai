@@ -11,4 +11,8 @@ aiofiles==24.1.0
 openai==1.55.3
 solana>=0.30.0
 solders>=0.20.0
+ipfshttpclient==0.8.0a2
+anchorpy>=0.18.0
+construct>=2.10.0
+construct-typing>=0.5.0
 

@@ -8,6 +8,7 @@ from config import settings
 from models import AgentChatRequest, PaymentConfirmation
 from database import db
 from x402_protocol import x402
+from services.reputation_service import reputation_service
 import logging
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -198,12 +199,22 @@ def execute_query_tool(
             f"[COST] Total: {total_cost} SOL ({estimated_rows} rows × {price_per_row} SOL/row)"
         )
 
-        # Create x402 payment request
+        # Get publisher wallet from dataset
+        publisher_wallet = dataset.publisher_wallet
+        if not publisher_wallet:
+            # Fallback to platform wallet if publisher didn't set one
+            from config import settings
+            publisher_wallet = settings.payment_wallet_address
+            if not publisher_wallet:
+                raise ValueError("No payment recipient configured. Dataset publisher must set wallet address.")
+
+        # Create x402 payment request with publisher's wallet
         resource_id = f"{dataset_slug}:{sql_query[:50]}"
         payment_request = x402.create_payment_request(
             amount_sol=total_cost,
             resource_id=resource_id,
             description=f"Query {dataset_name} ({estimated_rows} rows)",
+            recipient_wallet=publisher_wallet,  # Pay publisher directly
         )
 
         # Store query info with challenge ID for later execution
@@ -450,6 +461,34 @@ async def confirm_payment(payment: PaymentConfirmation):
             sql=payment_info["sql_query"],
             limit=10000,  # High limit to not restrict user queries
         )
+
+        # Create usage receipt attestation (proof of purchase for reviews)
+        try:
+            logger.info("[PAYMENT CONFIRM] Creating usage receipt attestation...")
+
+            # Get dataset info
+            dataset = db.get_dataset_by_slug(payment_info["dataset_slug"])
+            if dataset and payment.payer_wallet:
+                receipt = await reputation_service.create_usage_receipt(
+                    reviewer_wallet=payment.payer_wallet,
+                    dataset_id=dataset.id,
+                    dataset_version="v1",
+                    tx_signature=payment.transaction_signature,
+                    rows_accessed=len(rows),
+                    cost_paid=payment_info["amount"],
+                )
+                logger.info(
+                    f"[PAYMENT CONFIRM] Usage receipt created: {receipt['receipt_id']} for {payment.payer_wallet}"
+                )
+            else:
+                logger.warning(
+                    "[PAYMENT CONFIRM] Skipping usage receipt - no payer wallet provided"
+                )
+        except Exception as receipt_error:
+            logger.error(
+                f"[PAYMENT CONFIRM] Failed to create usage receipt: {receipt_error}"
+            )
+            # Don't fail the query if receipt creation fails
 
         # Return ALL rows retrieved (user paid for them!)
         return {

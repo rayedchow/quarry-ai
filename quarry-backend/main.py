@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from routers import datasets, agent
+from routers import datasets, agent, reputation, reviews
 
 # Create FastAPI app
 app = FastAPI(
@@ -51,6 +51,8 @@ app.add_middleware(
 # Include routers
 app.include_router(datasets.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
+app.include_router(reputation.router, prefix="/api")
+app.include_router(reviews.router, prefix="/api")
 
 
 @app.get("/")

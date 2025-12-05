@@ -348,16 +348,50 @@ function AgentPageContent() {
       console.log(`Sending transaction...`);
       console.log(`Transaction details:`, transaction);
       
+      // Check balance before sending
+      try {
+        const balance = await connection.getBalance(publicKey);
+        console.log(`Wallet balance: ${balance} lamports (${(balance / 1e9).toFixed(6)} SOL)`);
+        
+        const estimatedFee = 5000; // 5000 lamports ~= 0.000005 SOL
+        const totalNeeded = lamports + estimatedFee;
+        
+        if (balance < totalNeeded) {
+          throw new Error(
+            `Insufficient balance. Need ${(totalNeeded / 1e9).toFixed(6)} SOL (payment + fee), ` +
+            `but wallet only has ${(balance / 1e9).toFixed(6)} SOL. ` +
+            `Please add SOL to your wallet.`
+          );
+        }
+      } catch (balanceError: any) {
+        if (balanceError.message?.includes('Insufficient balance')) {
+          throw balanceError;
+        }
+        console.warn('Could not check balance:', balanceError);
+      }
+      
       // Send transaction (wallet will prompt user to sign)
       let signature;
       try {
+        console.log(`Requesting wallet signature...`);
         signature = await sendTransaction(transaction, connection);
-        console.log(`Transaction sent: ${signature}`);
+        console.log(`✅ Transaction sent: ${signature}`);
       } catch (txError: any) {
-        console.error(`Transaction send failed:`, txError);
+        console.error(`❌ Transaction send failed:`, txError);
+        console.error(`Error name:`, txError.name);
         console.error(`Error message:`, txError.message);
-        console.error(`Error details:`, txError);
-        throw new Error(`Failed to send transaction: ${txError.message || 'User rejected or transaction failed'}`);
+        console.error(`Error code:`, txError.code);
+        
+        // Provide user-friendly error messages
+        if (txError.message?.includes('User rejected')) {
+          throw new Error('Transaction cancelled - you rejected the wallet signature request');
+        } else if (txError.message?.includes('insufficient')) {
+          throw new Error('Insufficient SOL in wallet for this transaction');
+        } else if (txError.name === 'WalletSendTransactionError') {
+          throw new Error(`Wallet error: ${txError.message || 'Transaction failed. Please try again.'}`);
+        } else {
+          throw new Error(`Transaction failed: ${txError.message || 'Unknown error. Please try again.'}`);
+        }
       }
       
       // Wait for confirmation
@@ -383,7 +417,8 @@ function AgentPageContent() {
       // Confirm payment with backend using x402 challenge ID
       const result = await api.confirmPayment({
         query_id: challengeId,
-        transaction_signature: signature
+        transaction_signature: signature,
+        payer_wallet: publicKey.toBase58()  // Include wallet for usage receipt
       });
       
       console.log(`Backend verification successful:`, result);
@@ -573,21 +608,36 @@ function AgentPageContent() {
       setPendingToolCalls([]);
       
     } catch (error) {
-      console.error("x402 payment verification failed:", error);
+      console.error("❌ x402 payment failed:", error);
       
       let errorMessage = "Unknown error";
+      let errorTitle = "Payment Failed";
+      
       if (error instanceof Error) {
         errorMessage = error.message;
+        
+        // Provide user-friendly messages
+        if (errorMessage.includes('rejected') || errorMessage.includes('cancelled')) {
+          errorTitle = "Transaction Cancelled";
+          errorMessage = "You cancelled the transaction in your wallet.";
+        } else if (errorMessage.includes('Insufficient') || errorMessage.includes('insufficient')) {
+          errorTitle = "Insufficient Funds";
+          errorMessage = "Your wallet doesn't have enough SOL for this transaction. Please add SOL and try again.";
+        } else if (errorMessage.includes('User rejected')) {
+          errorTitle = "Transaction Cancelled";
+          errorMessage = "You cancelled the transaction in your wallet.";
+        }
       } else if (typeof error === 'string') {
         errorMessage = error;
       } else if (error && typeof error === 'object') {
         errorMessage = JSON.stringify(error);
       }
       
+      // Show error in the message
       setMessages((prev) => 
         prev.map((msg) =>
           msg.id === currentAIMessageId
-            ? { ...msg, content: `❌ Payment verification failed\n\n${errorMessage}\n\nPlease ensure your transaction was confirmed on-chain.` }
+            ? { ...msg, content: `❌ **${errorTitle}**\n\n${errorMessage}\n\n*Tip: You can try again by sending your message again, or ask a different question.*` }
             : msg
         )
       );

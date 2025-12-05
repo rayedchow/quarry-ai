@@ -30,7 +30,7 @@ class X402Protocol:
         self.pending_payments: Dict[str, Dict] = {}
 
     def create_payment_request(
-        self, amount_sol: float, resource_id: str, description: str
+        self, amount_sol: float, resource_id: str, description: str, recipient_wallet: str = None
     ) -> Dict:
         """
         Create an x402 payment request
@@ -39,14 +39,19 @@ class X402Protocol:
             amount_sol: Amount in SOL
             resource_id: Unique identifier for the resource
             description: Human-readable description
+            recipient_wallet: Wallet to receive payment (defaults to platform wallet)
 
         Returns:
             Payment request details including challenge ID
         """
-        # Validate payment wallet address is configured
-        if not settings.payment_wallet_address:
+        # Use provided recipient or fallback to platform wallet
+        if not recipient_wallet:
+            recipient_wallet = settings.payment_wallet_address
+        
+        # Validate recipient address is configured
+        if not recipient_wallet:
             raise ValueError(
-                "PAYMENT_WALLET_ADDRESS not configured. Please set it in .env file"
+                "No payment recipient configured. Dataset publisher must set wallet address."
             )
 
         challenge_id = str(uuid.uuid4())
@@ -54,7 +59,7 @@ class X402Protocol:
 
         payment_request = {
             "challenge_id": challenge_id,
-            "recipient": settings.payment_wallet_address,
+            "recipient": recipient_wallet,  # Use publisher's wallet
             "amount": amount_sol,
             "amount_lamports": lamports,
             "currency": "SOL",
