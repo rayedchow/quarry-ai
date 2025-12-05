@@ -4,6 +4,7 @@ import "./globals.css";
 import { SiteHeader } from "@/components/layout/site-header";
 import { DockNav } from "@/components/layout/dock-nav";
 import { BackgroundLines } from "@/components/ui/background-lines";
+import { WalletContextProvider } from "@/components/providers/wallet-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,6 +32,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
       >
+        <WalletContextProvider>
         <div className="relative min-h-screen overflow-hidden bg-slate-950 text-white">
           <BackgroundLines
             className="pointer-events-none absolute inset-0 -z-10 h-full w-full opacity-50 saturate-150 blur-[1px]"
@@ -40,29 +42,14 @@ export default function RootLayout({
           <div className="relative z-10 flex min-h-screen flex-col">
             <SiteHeader />
             <main className="flex-1">
-              <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-0">
+              <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
                 {children}
               </div>
             </main>
-            <footer className="border-t border-white/5 bg-black/40 backdrop-blur">
-              <div className="container flex flex-col gap-3 py-8 text-sm text-white/60 md:flex-row md:items-center md:justify-between">
-                <p>© {new Date().getFullYear()} Quarry AI. All rights reserved.</p>
-                <div className="flex gap-4">
-                  <a href="/privacy" className="hover:text-white">
-                    Privacy
-                  </a>
-                  <a href="/terms" className="hover:text-white">
-                    Terms
-                  </a>
-                  <a href="/status" className="hover:text-white">
-                    Status
-                  </a>
-                </div>
-              </div>
-            </footer>
           </div>
           <DockNav />
         </div>
+        </WalletContextProvider>
       </body>
     </html>
   );

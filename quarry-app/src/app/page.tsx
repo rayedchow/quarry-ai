@@ -11,8 +11,7 @@ import {
   Database,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DatasetCard } from "@/components/sections/dataset-card";
-import { datasets } from "@/data/datasets";
+import { FeaturedDatasets } from "@/components/sections/featured-datasets";
 import { BackgroundPaths } from "@/components/ui/background-paths";
 
 const heroStats = [
@@ -71,8 +70,6 @@ const schemaBenefits = [
     gradient: "from-amber-500 to-orange-500",
   },
 ];
-
-const featuredDatasets = datasets.slice(0, 3);
 
 export default function Home() {
   return (
@@ -195,11 +192,11 @@ export default function Home() {
                     Agent note
                   </p>
                   <p className="text-sm text-white/70 leading-relaxed">
-                    "Joining loyalty tiers from{" "}
+                    &quot;Joining loyalty tiers from{" "}
                     <span className="text-cyan-400">Global E-commerce</span> with
                     churn cohorts from{" "}
                     <span className="text-violet-400">Streaming Sentiment</span>.
-                    Estimated slice cost 2,000 rows × 0.002 SOL."
+                    Estimated slice cost 2,000 rows × 0.002 SOL.&quot;
                   </p>
                 </div>
               </div>
@@ -316,11 +313,7 @@ export default function Home() {
           </Button>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {featuredDatasets.map((dataset) => (
-            <DatasetCard key={dataset.id} dataset={dataset} compact />
-          ))}
-        </div>
+        <FeaturedDatasets />
       </section>
 
       {/* Provider CTA */}
@@ -359,13 +352,13 @@ export default function Home() {
             </ul>
             <div className="flex flex-wrap gap-4 pt-2">
               <Button className="h-12 rounded-full bg-white px-8 text-slate-900 font-semibold hover:bg-white/90" asChild>
-                <Link href="/providers">
+                <Link href="/datasets/publish">
                   <Upload className="h-4 w-4 mr-2" />
                   Upload dataset
                 </Link>
               </Button>
               <Button variant="ghost" className="h-12 text-white/80 hover:text-white" asChild>
-                <Link href="/providers#docs">View provider docs</Link>
+                <Link href="/datasets">View marketplace</Link>
               </Button>
             </div>
           </div>
@@ -406,10 +399,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Background Paths Section */}
-      <section className="glass-panel overflow-hidden">
-        <BackgroundPaths title="Schema Only Assurance Layer" />
-      </section>
     </div>
   );
 }

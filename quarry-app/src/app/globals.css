@@ -173,4 +173,88 @@
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+
+  /* Solana Wallet Adapter Styles */
+  .wallet-adapter-button {
+    font-family: inherit !important;
+    height: auto !important;
+  }
+  
+  .wallet-adapter-button-trigger {
+    font-family: inherit !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  
+  .wallet-adapter-button-start-icon {
+    margin-right: 0.5rem !important;
+    width: 1rem !important;
+    height: 1rem !important;
+  }
+  
+  .wallet-adapter-dropdown {
+    background: rgb(10, 10, 15) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 0.75rem !important;
+    padding: 0.5rem !important;
+  }
+  
+  .wallet-adapter-dropdown-list {
+    background: transparent !important;
+  }
+  
+  .wallet-adapter-dropdown-list-item {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border-radius: 0.5rem !important;
+    padding: 0.5rem 0.75rem !important;
+    transition: all 0.2s !important;
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+  
+  .wallet-adapter-dropdown-list-item:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: white !important;
+  }
+  
+  .wallet-adapter-modal-wrapper {
+    background: rgba(0, 0, 0, 0.8) !important;
+    backdrop-filter: blur(10px) !important;
+  }
+  
+  .wallet-adapter-modal {
+    background: rgb(10, 10, 15) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 1rem !important;
+  }
+  
+  .wallet-adapter-modal-title {
+    color: white !important;
+  }
+  
+  .wallet-adapter-modal-list {
+    background: transparent !important;
+  }
+  
+  .wallet-adapter-modal-list-item {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 0.75rem !important;
+    transition: all 0.2s !important;
+  }
+  
+  .wallet-adapter-modal-list-item:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(139, 92, 246, 0.3) !important;
+  }
 }

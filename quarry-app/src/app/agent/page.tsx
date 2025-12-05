@@ -1,471 +1,975 @@
 "use client";
 
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState, useRef } from "react";
 import {
-  CornerDownLeft,
   Loader2,
-  Paperclip,
   Plus,
-  Sparkles,
-  Trash2,
-  Wallet2,
-  X,
-  ChevronDown,
-  Bot,
   Database,
+  Trash2,
+  ChevronDown,
+  Send,
+  X,
+  CheckCircle,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { datasets } from "@/data/datasets";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { 
+  PublicKey, 
+  SystemProgram, 
+  Transaction,
+  LAMPORTS_PER_SOL 
+} from "@solana/web3.js";
+import { WalletButton } from "@/components/ui/wallet-button";
+import { api, Dataset, PaymentRequest } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import {
-  ChatBubble,
-  ChatBubbleAvatar,
-  ChatBubbleMessage,
-} from "@/components/ui/chat-bubble";
 import { ChatInput } from "@/components/ui/chat-input";
 import { ChatMessageList } from "@/components/ui/chat-message-list";
+import { MessageLoading } from "@/components/ui/message-loading";
 import { cn } from "@/lib/utils";
+
+type QueryResult = {
+  columns: string[];
+  rows: any[][];
+  total_rows: number;
+  returned_rows: number;
+  transaction: string;
+  sql_query: string;
+  cost: number;
+};
 
 type Message = {
   id: number;
   content: string;
   sender: "user" | "ai";
+  paymentRequestId?: string;
+  queryResults?: QueryResult[];
 };
 
 const initialMessages: Message[] = [
-  {
-    id: 1,
-    content:
-      "I'm ready. Attach any dataset schema and describe the slice you want.",
-    sender: "ai",
-  },
 ];
-
-const slicePreview = [
-  { dataset: "Global E-commerce", column: "loyalty_tier", type: "string" },
-  { dataset: "Streaming Sentiment", column: "sentiment_score", type: "float" },
-  { dataset: "Healthcare Triage", column: "wait_time_min", type: "int" },
-];
-
-function CheckoutModal({
-  open,
-  onClose,
-  selected,
-  totalRows,
-  pricePerRow,
-}: {
-  open: boolean;
-  onClose: () => void;
-  selected: string[];
-  totalRows: number;
-  pricePerRow: number;
-}) {
-  if (!open) return null;
-  const total = totalRows * pricePerRow;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="w-full max-w-xl glass-panel p-8 mx-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="section-label">Checkout</p>
-            <h2 className="mt-2 text-3xl font-semibold text-white">
-              Purchase slice
-            </h2>
-          </div>
-          <button
-            className="rounded-full border border-white/10 bg-white/[0.03] p-2 text-white/60 hover:text-white hover:bg-white/[0.06] transition-colors"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="mt-6 space-y-4">
-          <div className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.03] p-4">
-            <span className="text-white/60">Rows requested</span>
-            <span className="text-xl font-semibold text-white">
-              {totalRows.toLocaleString()}
-            </span>
-          </div>
-          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
-            <p className="text-xs uppercase tracking-wider text-white/40 mb-3">
-              Datasets
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {selected.map((slug) => {
-                const dataset = datasets.find((d) => d.slug === slug);
-                return (
-                  <span key={slug} className="rounded-full bg-cyan-500/20 px-3 py-1 text-sm font-medium text-cyan-400">
-                    {dataset?.name ?? slug}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-          <div className="rounded-2xl bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-white/10 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-lg font-semibold text-white">Total</span>
-              <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
-                {total.toFixed(3)} SOL
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-white/50">
-              {totalRows} rows × {pricePerRow.toFixed(4)} SOL
-            </p>
-          </div>
-          <Button className="w-full h-14 rounded-full bg-white text-slate-900 font-semibold hover:bg-white/90">
-            <Wallet2 className="h-4 w-4 mr-2" />
-            Approve in wallet
-          </Button>
-          <p className="text-xs text-white/40 text-center">
-            Data generation happens server-side only after the transaction has
-            settled on-chain.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function AgentPageContent() {
   const params = useSearchParams();
   const attachedFromQuery = params.getAll("attach");
-  const defaultSelection = attachedFromQuery.length
-    ? attachedFromQuery
-    : datasets.slice(0, 2).map((d) => d.slug);
+  const { publicKey, sendTransaction } = useWallet();
+  const { connection } = useConnection();
 
-  const [selectedDatasets, setSelectedDatasets] =
-    useState<string[]>(defaultSelection);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [loadingDatasets, setLoadingDatasets] = useState(true);
+  const [selectedDatasets, setSelectedDatasets] = useState<string[]>(() => {
+    // Initialize from query params first, then localStorage
+    if (attachedFromQuery.length > 0) return attachedFromQuery;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('quarry-attached-datasets');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          return [];
+        }
+      }
+    }
+    return [];
+  });
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [expandedDataset, setExpandedDataset] = useState<string | null>(null);
-  const [sliceHighlight, setSliceHighlight] = useState(false);
+  const [showAttachedPopup, setShowAttachedPopup] = useState(false);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const hasInitialized = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  const [paymentProcessing, setPaymentProcessing] = useState<Set<string>>(new Set());
+  const [currentAIMessageId, setCurrentAIMessageId] = useState<number | null>(null);
+  const [pendingDatasetsInfo, setPendingDatasetsInfo] = useState<any[]>([]);
+  const [pendingToolCalls, setPendingToolCalls] = useState<any[]>([]);
+  const [executedQueries, setExecutedQueries] = useState<Array<{query: string, result: any}>>([]);
+  const [viewingDataModal, setViewingDataModal] = useState<{
+    columns: string[];
+    rows: any[][];
+    sql_query: string;
+  } | null>(null);
 
-  const estimatedRows = 2000;
-  const pricePerRow = 0.002;
-  const totalCost = useMemo(
-    () => selectedDatasets.length * estimatedRows * pricePerRow,
-    [selectedDatasets]
-  );
+  // Persist selected datasets to localStorage
+  useEffect(() => {
+    if (hasInitialized.current) {
+      localStorage.setItem('quarry-attached-datasets', JSON.stringify(selectedDatasets));
+    }
+  }, [selectedDatasets]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = '44px'; // Reset to min height
+      const scrollHeight = textarea.scrollHeight;
+      textarea.style.height = Math.min(scrollHeight, 200) + 'px'; // Max 200px
+    }
+  }, [input]);
+
+  // Close popup when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        setShowAttachedPopup(false);
+      }
+    }
+    if (showAttachedPopup) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showAttachedPopup]);
+
+  // Fetch datasets from API
+  useEffect(() => {
+    api.getDatasets({ limit: 100 })
+      .then((response) => {
+        setDatasets(response.datasets);
+        // Only auto-select on first load if no datasets selected (from query or localStorage)
+        if (!hasInitialized.current && selectedDatasets.length === 0 && response.datasets.length > 0) {
+          setSelectedDatasets(response.datasets.slice(0, Math.min(2, response.datasets.length)).map(d => d.slug));
+        }
+        hasInitialized.current = true;
+      })
+      .catch(console.error)
+      .finally(() => setLoadingDatasets(false));
+  }, []);
 
   const handleRemoveDataset = (slug: string) => {
     setSelectedDatasets((prev) => prev.filter((item) => item !== slug));
   };
 
-  const handleSubmit = (e: FormEvent) => {
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
 
+    const userMessage = input;
+    const newMessageId = messages.length + 1;
+
     setMessages((prev) => [
       ...prev,
-      { id: prev.length + 1, content: input, sender: "user" },
+      { id: newMessageId, content: userMessage, sender: "user" },
     ]);
     setInput("");
-    setIsLoading(true);
-    setSliceHighlight(true);
-    setTimeout(() => setSliceHighlight(false), 700);
+    
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '44px';
+    }
 
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: prev.length + 1,
-          content:
-            "I'll pull 500 positive churn rows from E-commerce, join salary + age from Mobility, and keep the schema limited to the requested columns. Estimated cost 2,000 rows × 0.002 SOL.",
-          sender: "ai",
-        },
-      ]);
+    // Add placeholder for AI response
+    const aiMessageId = newMessageId + 1;
+    setCurrentAIMessageId(aiMessageId);
+    setMessages((prev) => [
+      ...prev,
+      { id: aiMessageId, content: "", sender: "ai" },
+    ]);
+    setIsLoading(true);
+
+    // Clear executed queries for new conversation turn
+    setExecutedQueries([]);
+
+    try {
+      // Build message history for API
+      const history = messages.map(msg => ({
+        role: msg.sender === "user" ? "user" : "assistant",
+        content: msg.content
+      }));
+
+      // Build datasets info with schemas
+      const datasetsInfo = selectedDatasetObjects.map((dataset, index) => ({
+        id: index,
+        slug: dataset.slug,
+        name: dataset.name,
+        table_name: `data_${dataset.slug.replace(/-/g, '_')}`,
+        schema: dataset.schema
+      }));
+      
+      // Store for payment handler
+      setPendingDatasetsInfo(datasetsInfo);
+
+      // Stream agent response
+      let fullContent = "";
+      let isFirstChunk = true;
+      
+      for await (const chunk of api.streamAgentMessage({
+        message: userMessage,
+        history: history,
+        attached_datasets: selectedDatasets,
+        datasets_info: datasetsInfo
+      })) {
+        // Check if chunk is a payment request
+        if (typeof chunk === 'object' && 'payment_required' in chunk) {
+          const paymentReq = chunk as PaymentRequest;
+          
+          console.log("Payment request received:", paymentReq.sql_query);
+          
+          // Add to payment requests array (multiple queries might need payment)
+          setPaymentRequests(prev => {
+            const exists = prev.some(p => p.payment_details.challenge_id === paymentReq.payment_details.challenge_id);
+            if (exists) return prev;
+            return [...prev, paymentReq];
+          });
+          
+          setIsLoading(false);
+          
+          // Store the tool call info for later
+          setPendingToolCalls(prev => [...prev, {
+            dataset_id: paymentReq.payment_details.resource_id.split(':')[0],
+            sql_query: paymentReq.sql_query,
+            challenge_id: paymentReq.payment_details.challenge_id
+          }]);
+          
+          // Set a special message for payment requests
+          setMessages((prev) => 
+            prev.map((msg) =>
+              msg.id === aiMessageId
+                ? { ...msg, content: "PAYMENT_REQUESTS" }
+                : msg
+            )
+          );
+          
+          continue; // Don't process as text
+        }
+        
+        if (isFirstChunk) {
+          setIsLoading(false);
+          isFirstChunk = false;
+        }
+        
+        fullContent += chunk as string;
+        const markdownContent = formatMarkdown(fullContent);
+        
+        setMessages((prev) => 
+          prev.map((msg) =>
+            msg.id === aiMessageId
+              ? { ...msg, content: markdownContent }
+              : msg
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Failed to send message:", error);
       setIsLoading(false);
-    }, 1200);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === aiMessageId
+            ? { ...msg, content: "Sorry, I encountered an error processing your message. Please try again." }
+            : msg
+        )
+      );
+    }
   };
 
+  const selectedDatasetObjects = useMemo(() => {
+    return selectedDatasets
+      .map(slug => datasets.find(d => d.slug === slug))
+      .filter((d): d is Dataset => d !== undefined);
+  }, [selectedDatasets, datasets]);
+
+  // Helper function to format markdown
+  const formatMarkdown = (content: string): string => {
+    let markdownContent = content;
+    
+    // Add line breaks before markdown headers if not already there
+    markdownContent = markdownContent.replace(/([^\n])(#{1,6}\s)/g, "$1\n\n$2");
+    
+    // Add line breaks before numbered lists if not already there
+    markdownContent = markdownContent.replace(/([^\n])(\d+\.\s)/g, "$1\n\n$2");
+    
+    // Add line breaks before bullet points if not already there
+    markdownContent = markdownContent.replace(/([^\n])([-•*]\s)/g, "$1\n\n$2");
+    
+    // Add line breaks before code blocks if not already there
+    markdownContent = markdownContent.replace(/([^\n])(```)/g, "$1\n\n$2");
+    
+    // Replace single newlines with double newlines for proper paragraph breaks
+    markdownContent = markdownContent.replace(/\n(?!\n)/g, "\n\n");
+    
+    // Clean up excessive newlines (more than 2 in a row)
+    markdownContent = markdownContent.replace(/\n{3,}/g, "\n\n");
+    
+    return markdownContent;
+  };
+
+  const handlePayment = async (payReq: PaymentRequest) => {
+    if (!payReq || currentAIMessageId === null) return;
+    
+    // Check if wallet is connected
+    if (!publicKey) {
+      alert("Please connect your Solflare wallet first");
+      return;
+    }
+    
+    const challengeId = payReq.payment_details.challenge_id;
+    setPaymentProcessing(prev => new Set(prev).add(challengeId));
+    
+    try {
+      console.log(`=== PROCESSING PAYMENT ===`);
+      console.log(`Challenge ID: ${challengeId}`);
+      console.log(`SQL: ${payReq.sql_query}`);
+      console.log(`Amount: ${payReq.payment_details.amount_lamports} lamports`);
+      
+      // Validate recipient address
+      if (!payReq.payment_details.recipient || payReq.payment_details.recipient === "") {
+        throw new Error("Payment recipient address not configured on backend. Please set PAYMENT_WALLET_ADDRESS in backend .env file");
+      }
+      
+      // Create Solana transaction for x402 payment
+      let recipientPubkey: PublicKey;
+      try {
+        recipientPubkey = new PublicKey(payReq.payment_details.recipient);
+      } catch (e) {
+        throw new Error(`Invalid recipient address: ${payReq.payment_details.recipient}. Please check PAYMENT_WALLET_ADDRESS in backend .env`);
+      }
+      
+      const lamports = payReq.payment_details.amount_lamports;
+      
+      console.log(`Creating transaction: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${lamports} lamports)`);
+      
+      // Create transfer instruction
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: recipientPubkey,
+          lamports: lamports,
+        })
+      );
+      
+      // Get recent blockhash
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
+      
+      console.log(`Sending transaction...`);
+      
+      // Send transaction (wallet will prompt user to sign)
+      const signature = await sendTransaction(transaction, connection);
+      
+      console.log(`Transaction sent: ${signature}`);
+      
+      // Wait for confirmation
+      console.log(`Waiting for confirmation...`);
+      const confirmation = await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      }, 'confirmed');
+      
+      console.log(`Confirmation received:`, confirmation);
+      
+      if (confirmation.value.err) {
+        throw new Error("Transaction failed to confirm");
+      }
+      
+      console.log(`Transaction confirmed successfully`);
+      console.log(`Sending to backend for x402 verification: challenge_id=${challengeId}, signature=${signature}`);
+      
+      // Give it a moment for the transaction to fully propagate
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Confirm payment with backend using x402 challenge ID
+      const result = await api.confirmPayment({
+        query_id: challengeId,
+        transaction_signature: signature
+      });
+      
+      console.log(`Backend verification successful:`, result);
+      
+      // Remove this payment from the list and mark as completed
+      setPaymentRequests(prev => prev.filter(p => p.payment_details.challenge_id !== challengeId));
+      
+      // Create completion data
+      const completionData: QueryResult = {
+        columns: result.columns,
+        rows: result.rows,
+        total_rows: result.total_rows,
+        returned_rows: result.returned_rows,
+        transaction: signature,
+        sql_query: payReq.sql_query,
+        cost: payReq.total_cost
+      };
+      
+      // IMMEDIATELY update the message to show completion (don't wait for stream)
+      setMessages((prev) => 
+        prev.map((msg) => {
+          if (msg.id === currentAIMessageId && msg.content === "PAYMENT_REQUESTS") {
+            const existingResults = msg.queryResults || [];
+            return { ...msg, queryResults: [...existingResults, completionData] };
+          }
+          return msg;
+        })
+      );
+      
+      // Force re-render to show completion card
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      setPaymentProcessing(prev => {
+        const next = new Set(prev);
+        next.delete(challengeId);
+        return next;
+      });
+      
+      // Store this query result
+      const newQueryResult = {
+        query: payReq.sql_query,
+        result: result
+      };
+      
+      const allQueries = [...executedQueries, newQueryResult];
+      setExecutedQueries(allQueries);
+      
+      console.log("=== PAYMENT CONFIRMED DEBUG ===");
+      console.log("Current executed queries:", allQueries);
+      console.log("Remaining payment requests:", paymentRequests.length - 1);
+      
+      // If there are more payments pending, just update the message and wait
+      if (paymentRequests.length > 1) {
+        console.log("More payments pending, updating message to show remaining...");
+        setMessages((prev) => 
+          prev.map((msg) =>
+            msg.id === currentAIMessageId
+              ? { ...msg, content: "PAYMENT_REQUESTS" }
+              : msg
+          )
+        );
+        return; // Wait for more payments
+      }
+      
+      // All payments done! Continue with agent
+      console.log("All payments complete! Continuing agent conversation...");
+      
+      // Create a NEW message for the agent's response (keep payment cards visible)
+      const responseMessageId = messages.length + 1;
+      setCurrentAIMessageId(responseMessageId);
+      setMessages((prev) => [
+        ...prev,
+        { id: responseMessageId, content: "", sender: "ai" }
+      ]);
+      
+      // Continue the agent conversation with ALL query results accumulated
+      const updatedHistory = [
+        ...messages.filter(m => m.sender === "user" || (m.sender === "ai" && m.id !== currentAIMessageId && m.content !== "PAYMENT_REQUESTS")).map(msg => ({
+          role: msg.sender === "user" ? "user" : "assistant",
+          content: msg.content || ""
+        }))
+      ];
+      
+      console.log("History being sent (filtered):", updatedHistory);
+      
+      // Format ALL executed queries so agent knows what data it already has
+      let dataAnalysisPrompt = `[EXECUTED QUERIES - Data Available]\n\nYou have already executed ${allQueries.length} quer${allQueries.length > 1 ? 'ies' : 'y'}:\n\n`;
+      
+      allQueries.forEach((queryData, idx) => {
+        dataAnalysisPrompt += `Query ${idx + 1}:\n`;
+        dataAnalysisPrompt += `SQL: ${queryData.query}\n`;
+        dataAnalysisPrompt += `Returned ${queryData.result.returned_rows} rows\n\n`;
+        
+        if (queryData.result.rows && queryData.result.rows.length > 0) {
+          dataAnalysisPrompt += `Data:\n`;
+          queryData.result.rows.forEach((row: any, rowIdx: number) => {
+            dataAnalysisPrompt += `  ${rowIdx + 1}. ${JSON.stringify(row)}\n`;
+          });
+        }
+        dataAnalysisPrompt += `\n`;
+      });
+      
+      dataAnalysisPrompt += `\nIMPORTANT: DO NOT re-query data you already have above. Use this data to answer the user's question. Only make NEW queries if you need DIFFERENT data that you don't already have.`;
+      
+      console.log("Data analysis prompt:", dataAnalysisPrompt);
+      
+      // Add as user message with all accumulated data
+      updatedHistory.push({
+        role: "user",
+        content: dataAnalysisPrompt
+      });
+      
+      console.log("Final history with data:", updatedHistory);
+      console.log("datasets_info being sent:", pendingDatasetsInfo);
+      
+      // Stream the agent's response WITH tools still available
+      let finalContent = "";
+      for await (const chunk of api.streamAgentMessage({
+        message: "",
+        history: updatedHistory,
+        attached_datasets: selectedDatasets,
+        datasets_info: pendingDatasetsInfo // Keep tools available!
+      })) {
+        if (typeof chunk === 'object' && 'payment_required' in chunk) {
+          // Agent wants more data in the continuation - shouldn't happen but handle it
+          const nextPaymentReq = chunk as PaymentRequest;
+          
+          console.log("Additional payment request in continuation:", nextPaymentReq.sql_query);
+          
+          setPaymentRequests(prev => {
+            const exists = prev.some(p => p.payment_details.challenge_id === nextPaymentReq.payment_details.challenge_id);
+            if (exists) return prev;
+            return [...prev, nextPaymentReq];
+          });
+          
+          setIsLoading(false);
+          
+          setPendingToolCalls(prev => [...prev, {
+            dataset_id: nextPaymentReq.payment_details.resource_id.split(':')[0],
+            sql_query: nextPaymentReq.sql_query,
+            challenge_id: nextPaymentReq.payment_details.challenge_id
+          }]);
+          
+          // Update message to show payment requests
+          setMessages((prev) => 
+            prev.map((msg) =>
+              msg.id === currentAIMessageId
+                ? { ...msg, content: "PAYMENT_REQUESTS" }
+                : msg
+            )
+          );
+          
+          break; // Stop streaming, wait for payment
+        }
+        
+        finalContent += chunk as string;
+        const markdownContent = formatMarkdown(finalContent);
+        setMessages((prev) => 
+          prev.map((msg) =>
+            msg.id === responseMessageId
+              ? { ...msg, content: markdownContent }
+              : msg
+          )
+        );
+      }
+      
+      // Clear after successful completion
+      setPaymentRequests([]);
+      setPendingToolCalls([]);
+      
+    } catch (error) {
+      console.error("x402 payment verification failed:", error);
+      
+      let errorMessage = "Unknown error";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error && typeof error === 'object') {
+        errorMessage = JSON.stringify(error);
+      }
+      
+      setMessages((prev) => 
+        prev.map((msg) =>
+          msg.id === currentAIMessageId
+            ? { ...msg, content: `❌ Payment verification failed\n\n${errorMessage}\n\nPlease ensure your transaction was confirmed on-chain.` }
+            : msg
+        )
+      );
+      setPaymentRequests([]);
+      setPendingToolCalls([]);
+      setPaymentProcessing(new Set());
+    }
+  };
+
+
   return (
-    <div className="py-8">
-      {/* Hero */}
-      <div className="mb-8 space-y-2">
-        <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-4 py-1.5">
-          <Bot className="h-3.5 w-3.5 text-violet-400" />
-          <span className="text-xs font-medium text-violet-400">Agent Workspace</span>
-        </div>
-        <h1 className="text-3xl font-semibold tracking-tight text-white">
-          Orchestrate your data slice
-        </h1>
-        <p className="text-white/50">
-          Attach datasets, describe your needs, and let the agent build your projection.
-        </p>
-      </div>
+    <div className="flex flex-col h-[calc(100vh-140px)] -mt-4">
+      {/* Chat Area - Main Focus */}
+      <div className="flex flex-col rounded-3xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm overflow-hidden h-full">
 
-      <div className="flex flex-col gap-8 xl:flex-row">
-        {/* Left Sidebar */}
-        <div className="space-y-6 xl:w-[380px] shrink-0">
-          {/* Context Window */}
-          <div className="glass-panel p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="section-label">Context window</p>
-                <h2 className="mt-1 text-xl font-semibold text-white">
-                  Attached datasets
-                </h2>
-              </div>
-              <Button className="btn-secondary h-9 text-xs" asChild>
-                <Link href="/datasets">
-                  <Plus className="h-3.5 w-3.5" />
-                  Add
-                </Link>
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              {selectedDatasets.length === 0 && (
-                <div className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/40 text-center">
-                  No datasets attached yet.
+        {/* Messages container - must have min-h-0 to allow flex shrinking */}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ChatMessageList className="h-full p-6">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center px-4">
+              <div className="relative mb-8">
+                {/* Gradient orb background */}
+                <div className="absolute inset-0 blur-3xl opacity-30">
+                  <div className="w-32 h-32 bg-gradient-to-br from-violet-500 to-fuchsia-500 rounded-full"></div>
                 </div>
+                {/* Icon */}
+                <div className="relative">
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center backdrop-blur-sm">
+                    <Database className="w-10 h-10 text-violet-400" />
+                  </div>
+                </div>
+              </div>
+              
+              <h3 className="text-xl font-semibold text-white mb-2">
+                Ready to explore your data
+              </h3>
+              <p className="text-white/50 text-sm max-w-sm mb-6">
+                {selectedDatasetObjects.length > 0 
+                  ? `You have ${selectedDatasetObjects.length} dataset${selectedDatasetObjects.length !== 1 ? 's' : ''} attached. Ask me anything about your data.`
+                  : "Attach a dataset to get started with AI-powered data analysis."
+                }
+              </p>
+              
+              {selectedDatasetObjects.length === 0 && (
+                <Link
+                  href="/datasets"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-sm transition-all"
+                >
+                  <Database className="w-4 h-4" />
+                  Browse Datasets
+                </Link>
               )}
-              {selectedDatasets.map((slug) => {
-                const dataset = datasets.find((d) => d.slug === slug);
-                if (!dataset) return null;
-                return (
-                  <div key={slug} className="glass-card p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 border border-white/10">
-                          <Database className="h-4 w-4 text-cyan-400" />
+            </div>
+          ) : (
+            <>
+            {messages.map((message) => (
+            <div
+              key={message.id}
+              className={cn(
+                message.sender === "user" ? "mb-6" : "",
+                "flex",
+                message.sender === "user" ? "justify-end" : "justify-start"
+              )}
+            >
+              {message.sender === "user" ? (
+                <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white">
+                  <div className="text-sm leading-relaxed">{message.content}</div>
+                </div>
+              ) : message.content === "PAYMENT_REQUESTS" ? (
+                <div className="max-w-[85%] space-y-2 mb-3">
+                  {/* Show completed payments first */}
+                  {message.queryResults && message.queryResults.map((queryResult, idx) => (
+                    <div key={`completed-${idx}`} className="bg-[#0a0a0f] border border-green-500/20 rounded-xl p-3 shadow-lg">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                          <span className="text-xs text-green-400 font-medium">
+                            Processed {queryResult.returned_rows} rows for {queryResult.cost.toFixed(6)} SOL
+                          </span>
                         </div>
-                        <div>
-                          <p className="font-medium text-white text-sm">{dataset.name}</p>
-                          <p className="text-xs text-white/40">
-                            {dataset.columnCount} columns
-                          </p>
+                        <Button
+                          onClick={() => setViewingDataModal({
+                            columns: queryResult.columns,
+                            rows: queryResult.rows,
+                            sql_query: queryResult.sql_query
+                          })}
+                          className="h-7 px-3 text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white flex-shrink-0"
+                        >
+                          <Database className="h-3 w-3 mr-1.5" />
+                          View
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* Then show pending payments */}
+                  {paymentRequests.length > 0 && (
+                    <>
+                      {paymentRequests.map((payReq, idx) => (
+                    <div key={payReq.payment_details.challenge_id} className="bg-[#0a0a0f] border border-white/10 rounded-2xl p-5 shadow-xl">
+                      <div className="mb-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse"></div>
+                          <span className="text-xs font-mono text-violet-300">x402 Payment #{idx + 1}</span>
+                        </div>
+                        <p className="text-sm text-white/70">Query execution requires payment</p>
+                      </div>
+
+                      {/* Payment Details */}
+                      <div className="bg-white/5 rounded-lg p-4 space-y-2.5 mb-4">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-white/60">Query</span>
+                          <code className="text-xs text-cyan-300 font-mono max-w-[60%] truncate">{payReq.sql_query}</code>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-white/60">Rows</span>
+                          <span className="text-white">{payReq.estimated_rows}</span>
+                        </div>
+                        <div className="border-t border-white/10 pt-2.5 mt-2.5">
+                          <div className="flex justify-between items-end">
+                            <span className="text-white/80 font-medium">Cost</span>
+                            <div className="text-cyan-400 font-semibold">{payReq.total_cost.toFixed(6)} SOL</div>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-3">
+                        <Button
+                          onClick={() => handlePayment(payReq)}
+                          disabled={paymentProcessing.has(payReq.payment_details.challenge_id) || !publicKey}
+                          className="flex-1 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 shadow-lg shadow-violet-500/20 disabled:opacity-50"
+                        >
+                          {paymentProcessing.has(payReq.payment_details.challenge_id) ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              Pay {payReq.total_cost.toFixed(6)} SOL
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {!publicKey && (
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mt-2">
+                      <div className="flex items-start gap-2">
+                        <Wallet className="h-4 w-4 text-yellow-400 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-xs text-yellow-200 font-medium mb-1">Wallet Not Connected</p>
+                          <p className="text-xs text-yellow-200/70 mb-2">Connect Solflare to make payments</p>
+                          <WalletButton />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="max-w-[85%] text-white/80">
+                  <div className="text-sm leading-relaxed prose prose-invert prose-sm max-w-none prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-headings:my-4 prose-code:text-cyan-400 prose-code:bg-white/5 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-strong:text-white prose-strong:font-semibold prose-pre:my-4">
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {isLoading && (
+            <div className="mb-6 flex justify-start">
+              <div className="flex items-center gap-2 text-white/40">
+                <MessageLoading />
+              </div>
+            </div>
+          )}
+            </>
+          )}
+          </ChatMessageList>
+        </div>
+
+        {/* Input Area */}
+        <div className="border-t border-white/5 p-4 flex-shrink-0">
+          <form onSubmit={handleSubmit}>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-3 focus-within:outline-none">
+              <ChatInput
+                ref={textareaRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSubmit(event as any);
+                  }
+                }}
+                placeholder={
+                  selectedDatasetObjects.length > 0
+                    ? "Ask about your data..."
+                    : "Attach a dataset to get started..."
+                }
+                className="w-full min-h-[44px] max-h-[200px] resize-none border-0 bg-transparent px-1 text-white text-sm placeholder:text-white/30 focus:ring-0 focus-visible:ring-0 focus:ring-offset-0 focus-visible:ring-offset-0 focus:outline-none focus-visible:outline-none overflow-y-auto scrollbar-hide"
+                rows={1}
+              />
+              <div className="flex items-center justify-between mt-2">
+          <div className="relative" ref={popupRef}>
+            <button
+              onClick={() => setShowAttachedPopup(!showAttachedPopup)}
+                    type="button"
+                    className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors px-1"
+            >
+              <Database className="h-3 w-3 text-cyan-400" />
+              <span>
+                {loadingDatasets ? (
+                  "Loading..."
+                ) : selectedDatasetObjects.length > 0 ? (
+                  `${selectedDatasetObjects.length} dataset${selectedDatasetObjects.length !== 1 ? 's' : ''} attached`
+                ) : (
+                  "No datasets"
+                )}
+              </span>
+              <ChevronDown className={cn("h-3 w-3 transition-transform", showAttachedPopup && "rotate-180")} />
+            </button>
+            
+                  {/* Attached datasets popup - appears above */}
+            {showAttachedPopup && (
+                    <div className="absolute bottom-full left-1 mb-2 w-72 rounded-xl border border-white/10 bg-[#0a0a0f]/95 backdrop-blur-xl p-2 shadow-xl z-50">
+                {selectedDatasetObjects.length > 0 && (
+                  <div className="space-y-1 mb-2">
+                    <p className="text-[10px] uppercase tracking-wider text-white/30 px-3 py-1">Attached</p>
+                    {selectedDatasetObjects.map((dataset) => (
+                      <div
+                        key={dataset.slug}
+                        className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-white/[0.04] group"
+                      >
+                        <a
+                          href={`/datasets/${dataset.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+                        >
+                          <Database className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                          <span className="text-sm text-white/70 truncate hover:text-white transition-colors">{dataset.name}</span>
+                        </a>
                         <button
-                          className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/[0.05] transition-colors"
-                          onClick={() => handleRemoveDataset(slug)}
-                          aria-label="Remove dataset"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveDataset(dataset.slug);
+                          }}
+                          className="p-1.5 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
-                        <button
-                          className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/[0.05] transition-colors"
-                          onClick={() =>
-                            setExpandedDataset((prev) =>
-                              prev === slug ? null : slug
-                            )
-                          }
-                          aria-label="Toggle schema"
-                        >
-                          <ChevronDown
-                            className={cn(
-                              "h-3.5 w-3.5 transition-transform",
-                              expandedDataset === slug && "rotate-180"
-                            )}
-                          />
-                        </button>
                       </div>
-                    </div>
-                    {expandedDataset === slug && (
-                      <div className="mt-3 space-y-1.5 pl-12">
-                        {dataset.schema.slice(0, 3).map((column) => (
-                          <div
-                            key={column.name}
-                            className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-xs"
-                          >
-                            <span className="text-white/70">{column.name}</span>
-                            <span className="font-mono text-white/30">{column.type}</span>
-                          </div>
-                        ))}
-                        {dataset.schema.length > 3 && (
-                          <p className="text-xs text-white/30 pl-3">
-                            + {dataset.schema.length - 3} more
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                )}
+                
+                {datasets.length === 0 && (
+                  <Link
+                    href="/datasets/publish"
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-white/40 hover:text-white hover:bg-white/[0.04] transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Upload your first dataset
+                  </Link>
+                )}
 
-          {/* Slice Preview */}
-          <div
-            className={cn(
-              "glass-panel p-6 space-y-4 transition-all duration-300",
-              sliceHighlight && "ring-2 ring-cyan-500/30"
+                {/* Add dataset button */}
+                <div className="border-t border-white/5 mt-2 pt-2">
+                  <Link
+                    href="/datasets"
+                    className="flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-white/50 hover:text-white hover:bg-white/[0.04] transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Browse marketplace
+                  </Link>
+                </div>
+              </div>
             )}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="section-label">Slice preview</p>
-                <h2 className="mt-1 text-xl font-semibold text-white">
-                  Columns included
-                </h2>
-              </div>
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-xs text-white/50">
-                schema only
-              </span>
-            </div>
-            <div className="space-y-2">
-              {slicePreview.map((entry) => (
-                <div
-                  key={entry.column}
-                  className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-3"
-                >
-                  <div>
-                    <p className="font-medium text-white/80 text-sm">{entry.column}</p>
-                    <p className="text-xs text-white/40">{entry.dataset}</p>
-                  </div>
-                  <span className="text-xs font-mono text-white/30">{entry.type}</span>
-                </div>
-              ))}
-            </div>
           </div>
-
-          {/* Purchase Card */}
-          <div className="glass-panel p-6 space-y-4 bg-gradient-to-br from-emerald-500/10 via-transparent to-cyan-500/10">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-white/50">Rows requested</span>
-                <span className="font-medium text-white">
-                  {estimatedRows.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-white/50">Datasets included</span>
-                <span className="font-medium text-white">
-                  {selectedDatasets.length}
-                </span>
-              </div>
-              <div className="divider" />
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-semibold text-white">Est. total</span>
-                <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
-                  {totalCost.toFixed(3)} SOL
-                </span>
-              </div>
-            </div>
-            <Button
-              className="w-full h-12 rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold shadow-[0_4px_20px_rgba(16,185,129,0.3)] hover:shadow-[0_8px_30px_rgba(16,185,129,0.4)] transition-all hover:-translate-y-0.5"
-              onClick={() => setCheckoutOpen(true)}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Purchase slice
-            </Button>
-          </div>
-        </div>
-
-        {/* Chat Area */}
-        <div className="flex-1 glass-panel p-6 flex flex-col">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <p className="section-label">Agent chat</p>
-              <h2 className="mt-1 text-xl font-semibold text-white">
-                "What slice do you need?"
-              </h2>
-            </div>
-            <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-white/50">
-              schema access only
-            </span>
-          </div>
-
-          <div className="flex-1 flex flex-col rounded-2xl border border-white/5 bg-black/40 overflow-hidden min-h-[500px]">
-            <ChatMessageList className="flex-1 p-4">
-              {messages.map((message) => (
-                <ChatBubble
-                  key={message.id}
-                  variant={message.sender === "user" ? "sent" : "received"}
-                >
-                  <ChatBubbleAvatar
-                    className="h-9 w-9 shrink-0"
-                    src={
-                      message.sender === "user"
-                        ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=64&h=64&q=80&crop=faces&fit=crop"
-                        : "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=64&h=64&q=80&crop=faces&fit=crop"
-                    }
-                    fallback={message.sender === "user" ? "US" : "AI"}
-                  />
-                  <ChatBubbleMessage
-                    variant={message.sender === "user" ? "sent" : "received"}
-                  >
-                    {message.content}
-                  </ChatBubbleMessage>
-                </ChatBubble>
-              ))}
-              {isLoading && (
-                <ChatBubble variant="received">
-                  <ChatBubbleAvatar
-                    className="h-9 w-9 shrink-0"
-                    src="https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=64&h=64&q=80&crop=faces&fit=crop"
-                    fallback="AI"
-                  />
-                  <ChatBubbleMessage isLoading />
-                </ChatBubble>
-              )}
-            </ChatMessageList>
-
-            <div className="border-t border-white/5 p-4">
-              <form
-                onSubmit={handleSubmit}
-                className="rounded-xl border border-white/10 bg-white/[0.02] p-3"
+              <Button
+                type="submit"
+                size="sm"
+                  className="h-8 w-8 p-0 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 transition-all hover:-translate-y-0.5"
+                disabled={isLoading || selectedDatasetObjects.length === 0}
               >
-                <ChatInput
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="Get me 500 positive churn rows and join age + salary..."
-                  className="min-h-[60px] resize-none border-0 bg-transparent px-1 text-white text-sm placeholder:text-white/30"
-                />
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
-                  <div className="flex gap-1.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 rounded-lg border border-white/10 text-white/50 hover:text-white hover:bg-white/[0.05]"
-                    >
-                      <Paperclip className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 rounded-lg border border-white/10 text-white/50 hover:text-white hover:bg-white/[0.05]"
-                    >
-                      <Wallet2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <Button
-                    type="submit"
-                    size="sm"
-                    className="btn-primary h-9 px-5"
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        Send
-                        <CornerDownLeft className="h-3.5 w-3.5 ml-1.5" />
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </form>
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                    <Send className="h-4 w-4" />
+                )}
+              </Button>
+              </div>
             </div>
-          </div>
+          </form>
         </div>
       </div>
 
-      <CheckoutModal
-        open={checkoutOpen}
-        onClose={() => setCheckoutOpen(false)}
-        selected={selectedDatasets}
-        totalRows={estimatedRows}
-        pricePerRow={pricePerRow}
-      />
+      {/* Data Table Modal */}
+      {viewingDataModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl max-w-4xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between p-6 border-b border-white/10">
+              <div className="flex-1">
+                <h3 className="text-xl font-semibold text-white mb-2">Query Results</h3>
+                <code className="text-xs text-white/50 font-mono break-all">
+                  {viewingDataModal.sql_query}
+                </code>
+              </div>
+              <button
+                onClick={() => setViewingDataModal(null)}
+                className="text-white/40 hover:text-white/70 transition-colors ml-4"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Table Container */}
+            <div className="flex-1 overflow-auto p-6">
+              <div className="border border-white/10 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-white/5 border-b border-white/10">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">
+                        #
+                      </th>
+                      {viewingDataModal.columns.map((col, idx) => (
+                        <th key={idx} className="px-4 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {viewingDataModal.rows.map((row, rowIdx) => (
+                      <tr key={rowIdx} className="hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3 text-white/40 text-xs">
+                          {rowIdx + 1}
+                        </td>
+                        {row.map((cell, cellIdx) => (
+                          <td key={cellIdx} className="px-4 py-3 text-white/80">
+                            {typeof cell === 'string' ? cell : JSON.stringify(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-6 border-t border-white/10">
+              <div className="text-sm text-white/50">
+                Showing {viewingDataModal.rows.length} rows
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setViewingDataModal(null)}
+                  className="bg-white/5 hover:bg-white/10 border border-white/10 text-white"
+                >
+                  Close
+                </Button>
+                <Button
+                  onClick={() => {
+                    // Convert to CSV
+                    const headers = viewingDataModal.columns.join(',');
+                    const rows = viewingDataModal.rows.map(row => 
+                      row.map(cell => {
+                        const str = typeof cell === 'string' ? cell : JSON.stringify(cell);
+                        // Escape quotes and wrap in quotes if contains comma
+                        return str.includes(',') || str.includes('"') || str.includes('\n') 
+                          ? `"${str.replace(/"/g, '""')}"` 
+                          : str;
+                      }).join(',')
+                    ).join('\n');
+                    const csv = `${headers}\n${rows}`;
+                    
+                    // Download CSV
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `query-results-${Date.now()}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white"
+                >
+                  <Database className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -477,7 +981,7 @@ export default function AgentPage() {
         <div className="flex min-h-[50vh] items-center justify-center">
           <div className="flex items-center gap-3 text-white/60">
             <Loader2 className="h-5 w-5 animate-spin" />
-            Loading agent experience...
+            <span>Loading...</span>
           </div>
         </div>
       }

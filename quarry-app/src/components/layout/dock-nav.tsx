@@ -2,14 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Bot,
-  Database,
-  Download,
-  Home,
-  UsersRound,
-  Wallet2,
-} from "lucide-react";
+import { Bot, Database, Home } from "lucide-react";
 import { Dock, DockIcon, DockItem, DockLabel } from "@/components/ui/dock";
 import { cn } from "@/lib/utils";
 
@@ -17,9 +10,6 @@ const navItems = [
   { label: "Home", href: "/", icon: Home },
   { label: "Marketplace", href: "/datasets", icon: Database },
   { label: "Agent", href: "/agent", icon: Bot },
-  { label: "Providers", href: "/providers", icon: UsersRound },
-  { label: "Checkout", href: "/checkout", icon: Wallet2 },
-  { label: "Downloads", href: "/download", icon: Download },
 ];
 
 export function DockNav() {
