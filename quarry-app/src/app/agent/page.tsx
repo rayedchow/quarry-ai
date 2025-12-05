@@ -891,18 +891,10 @@ function AgentPageContent() {
                         <label className="text-xs text-white/60 mb-2 block">Select Payment Currency</label>
                         <div className="grid grid-cols-2 gap-2">
                           {(() => {
-                            // Calculate amounts based on ORIGINAL backend currency
-                            const SOL_TO_USDC_RATE = 140.0;
                             const originalCurrency = payReq.payment_details.currency || "SOL";
                             const originalAmount = payReq.total_cost;
-                            
-                            // Convert to both currencies
-                            const solAmount = originalCurrency === "SOL" 
-                              ? originalAmount 
-                              : originalAmount / SOL_TO_USDC_RATE;
-                            const usdcAmount = originalCurrency === "USDC"
-                              ? originalAmount
-                              : originalAmount * SOL_TO_USDC_RATE;
+                            const solAmount = calculatePaymentAmount(originalAmount, originalCurrency, "SOL");
+                            const usdcAmount = calculatePaymentAmount(originalAmount, originalCurrency, "USDC");
                             
                             return (
                               <>
