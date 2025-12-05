@@ -107,6 +107,7 @@ export type AgentChatRequest = {
   history: ChatMessage[];
   attached_datasets: string[];
   datasets_info: DatasetInfo[];
+  currency?: string;
 };
 
 export type AgentChatResponse = {
@@ -123,12 +124,17 @@ export type PaymentRequest = {
   estimated_rows: number;
   price_per_row: number;
   total_cost: number;
+  currency: string;
   payment_details: {
     challenge_id: string;
     recipient: string;
+    recipient_token_account?: string;
     amount: number;
-    amount_lamports: number;
+    amount_lamports?: number;
+    amount_tokens?: number;
     currency: string;
+    mint_address?: string;
+    decimals: number;
     resource_id: string;
     description: string;
     timestamp: number;
@@ -140,6 +146,7 @@ export type PaymentConfirmation = {
   query_id: string;
   transaction_signature: string;
   payer_wallet?: string;
+  currency?: string;
 };
 
 class ApiClient {

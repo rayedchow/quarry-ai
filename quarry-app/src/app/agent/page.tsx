@@ -23,6 +23,12 @@ import {
   Transaction,
   LAMPORTS_PER_SOL 
 } from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createTransferCheckedInstruction,
+} from "@solana/spl-token";
 import { WalletButton } from "@/components/ui/wallet-button";
 import { api, Dataset, PaymentRequest } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -93,6 +99,13 @@ function AgentPageContent() {
     rows: any[][];
     sql_query: string;
   } | null>(null);
+  const [selectedCurrency, setSelectedCurrency] = useState<"SOL" | "USDC">("SOL");
+
+  // USDC Mint addresses
+  const USDC_MINT_DEVNET = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+  const USDC_MINT_MAINNET = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  // Use devnet for now (can be switched based on connection endpoint)
+  const USDC_MINT = USDC_MINT_DEVNET;
 
   // Persist selected datasets to localStorage
   useEffect(() => {
@@ -203,7 +216,8 @@ function AgentPageContent() {
         message: userMessage,
         history: history,
         attached_datasets: selectedDatasets,
-        datasets_info: datasetsInfo
+        datasets_info: datasetsInfo,
+        currency: selectedCurrency
       })) {
         console.log("Received chunk:", typeof chunk, chunk);
         
@@ -281,20 +295,23 @@ function AgentPageContent() {
     return content;
   };
 
-  // Format SOL amounts to show at least 1 significant figure
-  const formatSOL = (amount: number): string => {
-    if (amount === 0) return "0 SOL";
+  // Format currency amounts to show at least 1 significant figure
+  const formatCurrency = (amount: number, currency: string = "SOL"): string => {
+    if (amount === 0) return `0 ${currency}`;
     
     // Find the number of decimal places needed to show at least 1 significant figure
     const absAmount = Math.abs(amount);
     if (absAmount >= 1) {
-      return `${amount.toFixed(4)} SOL`;
+      return `${amount.toFixed(currency === "USDC" ? 2 : 4)} ${currency}`;
     }
     
     // For small numbers, find first non-zero digit
     const decimals = Math.ceil(-Math.log10(absAmount)) + 1;
-    return `${amount.toFixed(Math.min(decimals, 10))} SOL`;
+    return `${amount.toFixed(Math.min(decimals, currency === "USDC" ? 6 : 10))} ${currency}`;
   };
+
+  // Legacy function for backwards compatibility
+  const formatSOL = (amount: number): string => formatCurrency(amount, "SOL");
 
   const handlePayment = async (payReq: PaymentRequest) => {
     if (!payReq || currentAIMessageId === null) return;
@@ -327,18 +344,73 @@ function AgentPageContent() {
         throw new Error(`Invalid recipient address: ${payReq.payment_details.recipient}. Please check PAYMENT_WALLET_ADDRESS in backend .env`);
       }
       
-      const lamports = payReq.payment_details.amount_lamports;
+      const currency = payReq.payment_details.currency || payReq.currency || "SOL";
+      const transaction = new Transaction();
       
-      console.log(`Creating transaction: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${lamports} lamports)`);
-      
-      // Create transfer instruction
-      const transaction = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: recipientPubkey,
-          lamports: lamports,
-        })
-      );
+      if (currency === "USDC") {
+        // USDC SPL Token Transfer
+        console.log(`Creating USDC transfer: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${payReq.payment_details.amount} USDC)`);
+        
+        const amount = payReq.payment_details.amount_tokens || Math.floor(payReq.payment_details.amount * 1_000_000); // 6 decimals
+        
+        // Get sender's USDC token account
+        const fromTokenAccount = await getAssociatedTokenAddress(
+          USDC_MINT,
+          publicKey
+        );
+        
+        // Get recipient's USDC token account
+        const toTokenAccount = await getAssociatedTokenAddress(
+          USDC_MINT,
+          recipientPubkey
+        );
+        
+        console.log(`From token account: ${fromTokenAccount.toBase58()}`);
+        console.log(`To token account: ${toTokenAccount.toBase58()}`);
+        console.log(`Amount: ${amount} (smallest units)`);
+        
+        // Check if recipient token account exists, if not create it
+        try {
+          const recipientAccountInfo = await connection.getAccountInfo(toTokenAccount);
+          if (!recipientAccountInfo) {
+            console.log(`Recipient token account doesn't exist, creating it...`);
+            transaction.add(
+              createAssociatedTokenAccountInstruction(
+                publicKey, // payer
+                toTokenAccount, // ata
+                recipientPubkey, // owner
+                USDC_MINT // mint
+              )
+            );
+          }
+        } catch (e) {
+          console.warn("Could not check recipient token account, will attempt transfer anyway:", e);
+        }
+        
+        // Add USDC transfer instruction
+        transaction.add(
+          createTransferCheckedInstruction(
+            fromTokenAccount,
+            USDC_MINT,
+            toTokenAccount,
+            publicKey,
+            amount,
+            6 // USDC decimals
+          )
+        );
+      } else {
+        // Native SOL Transfer
+        const lamports = payReq.payment_details.amount_lamports || Math.floor(payReq.payment_details.amount * 1_000_000_000);
+        console.log(`Creating SOL transfer: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${lamports} lamports)`);
+        
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: recipientPubkey,
+            lamports: lamports,
+          })
+        );
+      }
       
       // Get recent blockhash
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
@@ -350,21 +422,51 @@ function AgentPageContent() {
       
       // Check balance before sending
       try {
-        const balance = await connection.getBalance(publicKey);
-        console.log(`Wallet balance: ${balance} lamports (${(balance / 1e9).toFixed(6)} SOL)`);
-        
-        const estimatedFee = 5000; // 5000 lamports ~= 0.000005 SOL
-        const totalNeeded = lamports + estimatedFee;
-        
-        if (balance < totalNeeded) {
-          throw new Error(
-            `Insufficient balance. Need ${(totalNeeded / 1e9).toFixed(6)} SOL (payment + fee), ` +
-            `but wallet only has ${(balance / 1e9).toFixed(6)} SOL. ` +
-            `Please add SOL to your wallet.`
-          );
+        if (currency === "USDC") {
+          // Check USDC token balance
+          const fromTokenAccount = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+          const tokenAccountInfo = await connection.getTokenAccountBalance(fromTokenAccount);
+          const usdcBalance = parseInt(tokenAccountInfo.value.amount);
+          const amount = payReq.payment_details.amount_tokens || Math.floor(payReq.payment_details.amount * 1_000_000);
+          
+          console.log(`USDC balance: ${usdcBalance} (${(usdcBalance / 1e6).toFixed(2)} USDC)`);
+          
+          if (usdcBalance < amount) {
+            throw new Error(
+              `Insufficient USDC balance. Need ${(amount / 1e6).toFixed(2)} USDC, ` +
+              `but wallet only has ${(usdcBalance / 1e6).toFixed(2)} USDC. ` +
+              `Please add USDC to your wallet.`
+            );
+          }
+          
+          // Also check SOL for transaction fees
+          const solBalance = await connection.getBalance(publicKey);
+          const estimatedFee = 10000; // Higher for token transfers
+          if (solBalance < estimatedFee) {
+            throw new Error(
+              `Insufficient SOL for transaction fee. Need ${(estimatedFee / 1e9).toFixed(6)} SOL for fees, ` +
+              `but wallet only has ${(solBalance / 1e9).toFixed(6)} SOL.`
+            );
+          }
+        } else {
+          // Check SOL balance
+          const balance = await connection.getBalance(publicKey);
+          console.log(`Wallet balance: ${balance} lamports (${(balance / 1e9).toFixed(6)} SOL)`);
+          
+          const lamports = payReq.payment_details.amount_lamports || Math.floor(payReq.payment_details.amount * 1_000_000_000);
+          const estimatedFee = 5000; // 5000 lamports ~= 0.000005 SOL
+          const totalNeeded = lamports + estimatedFee;
+          
+          if (balance < totalNeeded) {
+            throw new Error(
+              `Insufficient balance. Need ${(totalNeeded / 1e9).toFixed(6)} SOL (payment + fee), ` +
+              `but wallet only has ${(balance / 1e9).toFixed(6)} SOL. ` +
+              `Please add SOL to your wallet.`
+            );
+          }
         }
       } catch (balanceError: any) {
-        if (balanceError.message?.includes('Insufficient balance')) {
+        if (balanceError.message?.includes('Insufficient')) {
           throw balanceError;
         }
         console.warn('Could not check balance:', balanceError);
@@ -418,7 +520,8 @@ function AgentPageContent() {
       const result = await api.confirmPayment({
         query_id: challengeId,
         transaction_signature: signature,
-        payer_wallet: publicKey.toBase58()  // Include wallet for usage receipt
+        payer_wallet: publicKey.toBase58(),  // Include wallet for usage receipt
+        currency: selectedCurrency
       });
       
       console.log(`Backend verification successful:`, result);
@@ -549,7 +652,8 @@ function AgentPageContent() {
         message: "",
         history: updatedHistory,
         attached_datasets: selectedDatasets,
-        datasets_info: pendingDatasetsInfo // Keep tools available!
+        datasets_info: pendingDatasetsInfo, // Keep tools available!
+        currency: selectedCurrency
       })) {
         console.log("Continuation chunk:", typeof chunk, JSON.stringify(chunk).slice(0, 100));
         
@@ -746,6 +850,35 @@ function AgentPageContent() {
                         <p className="text-sm text-white/70">Query execution requires payment</p>
                       </div>
 
+                      {/* Currency Selector */}
+                      <div className="mb-4">
+                        <label className="text-xs text-white/60 mb-2 block">Payment Currency</label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setSelectedCurrency("SOL")}
+                            className={cn(
+                              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                              selectedCurrency === "SOL"
+                                ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/20"
+                                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                            )}
+                          >
+                            SOL
+                          </button>
+                          <button
+                            onClick={() => setSelectedCurrency("USDC")}
+                            className={cn(
+                              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                              selectedCurrency === "USDC"
+                                ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20"
+                                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                            )}
+                          >
+                            USDC
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Payment Details */}
                       <div className="bg-white/5 rounded-lg p-4 space-y-2.5 mb-4">
                         <div className="flex justify-between text-sm">
@@ -759,7 +892,7 @@ function AgentPageContent() {
                         <div className="border-t border-white/10 pt-2.5 mt-2.5">
                           <div className="flex justify-between items-end">
                             <span className="text-white/80 font-medium">Cost</span>
-                            <div className="text-cyan-400 font-semibold">{formatSOL(payReq.total_cost)}</div>
+                            <div className="text-cyan-400 font-semibold">{formatCurrency(payReq.total_cost, selectedCurrency)}</div>
                           </div>
                         </div>
                       </div>
@@ -778,7 +911,7 @@ function AgentPageContent() {
                             </>
                           ) : (
                             <>
-                              Pay {formatSOL(payReq.total_cost)}
+                              Pay {formatCurrency(payReq.total_cost, selectedCurrency)}
                             </>
                           )}
                         </Button>
