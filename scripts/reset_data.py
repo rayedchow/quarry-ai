@@ -89,26 +89,75 @@ def reset_database():
         result = conn.execute("SELECT COUNT(*) FROM datasets").fetchone()
         dataset_count = result[0] if result else 0
 
-        # Drop and recreate the datasets table
+        # Drop all tables (in correct order due to foreign keys)
+        conn.execute("DROP TABLE IF EXISTS review_helpful_votes")
+        conn.execute("DROP TABLE IF EXISTS reviews")
         conn.execute("DROP TABLE IF EXISTS datasets")
+        
+        # Recreate datasets table with all latest columns
         conn.execute("""
             CREATE TABLE datasets (
                 id VARCHAR PRIMARY KEY,
                 slug VARCHAR UNIQUE NOT NULL,
                 name VARCHAR NOT NULL,
                 publisher VARCHAR NOT NULL,
+                publisher_wallet VARCHAR,
                 tags JSON,
                 description TEXT,
                 summary TEXT,
                 price_per_row DOUBLE DEFAULT 0.001,
-                row_count INTEGER DEFAULT 0,
+                row_count BIGINT DEFAULT 0,
                 column_count INTEGER DEFAULT 0,
                 update_frequency VARCHAR DEFAULT 'static',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 schema_columns JSON,
                 parquet_path VARCHAR,
-                original_filename VARCHAR
+                original_filename VARCHAR,
+                reputation_data JSON
+            )
+        """)
+        
+        # Create index on slug
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_datasets_slug ON datasets(slug)
+        """)
+        
+        # Create reviews table
+        conn.execute("""
+            CREATE TABLE reviews (
+                id VARCHAR PRIMARY KEY,
+                dataset_id VARCHAR NOT NULL,
+                dataset_version VARCHAR DEFAULT 'v1',
+                reviewer_wallet VARCHAR NOT NULL,
+                rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+                review_text TEXT NOT NULL,
+                review_text_cid VARCHAR NOT NULL,
+                usage_receipt_attestation VARCHAR NOT NULL,
+                review_attestation_id VARCHAR NOT NULL,
+                review_attestation_address VARCHAR NOT NULL,
+                helpful_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id)
+            )
+        """)
+        
+        # Create indexes for reviews
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reviews_dataset ON reviews(dataset_id, dataset_version)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reviews_wallet ON reviews(reviewer_wallet)
+        """)
+        
+        # Create helpful votes table
+        conn.execute("""
+            CREATE TABLE review_helpful_votes (
+                review_id VARCHAR NOT NULL,
+                voter_wallet VARCHAR NOT NULL,
+                voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (review_id, voter_wallet),
+                FOREIGN KEY (review_id) REFERENCES reviews(id)
             )
         """)
 
@@ -160,6 +209,10 @@ def main():
     print("RESET COMPLETE")
     print("=" * 70)
     print(f"\nTotal items deleted: {total_deleted}")
+    print("\nDatabase schema recreated with:")
+    print("  ✅ datasets table (with reputation_data, publisher_wallet)")
+    print("  ✅ reviews table (on-chain review system)")
+    print("  ✅ review_helpful_votes table (anti-spam)")
     print("\nThe database is now empty and ready for fresh data.")
     print("=" * 70)
 
