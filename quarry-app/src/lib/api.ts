@@ -287,33 +287,53 @@ class ApiClient {
     }
 
     try {
+      let buffer = "";
+      
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") {
-              return;
-            }
-            if (data.startsWith("{")) {
-              // Could be error or payment request
-              const parsed = JSON.parse(data);
-              if (parsed.error) {
-                throw new Error(parsed.error);
+        buffer += decoder.decode(value, { stream: true });
+        
+        // SSE format: each event is "data: content\n\n"
+        // Split by the event boundary pattern, not by single \n
+        // This preserves newlines WITHIN the content
+        while (buffer.includes("\n\ndata: ") || buffer.includes("\n\n[DONE]")) {
+          let eventEnd = buffer.indexOf("\n\ndata: ");
+          if (eventEnd === -1) {
+            eventEnd = buffer.indexOf("\n\n");
+          }
+          
+          if (eventEnd !== -1) {
+            const event = buffer.slice(0, eventEnd);
+            buffer = buffer.slice(eventEnd + 2);  // Skip the \n\n
+            
+            // Process the event
+            if (event.startsWith("data: ")) {
+              const data = event.slice(6);
+              
+              if (data === "[DONE]") {
+                return;
               }
-              if (parsed.payment_required) {
-                // Return payment request object
-                yield parsed as PaymentRequest;
+              if (data.startsWith("{")) {
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.error) {
+                    throw new Error(parsed.error);
+                  }
+                  if (parsed.payment_required) {
+                    yield parsed as PaymentRequest;
+                  }
+                } catch (e) {
+                  yield data;
+                }
+              } else {
+                // Text content with newlines preserved!
+                yield data;
               }
-            } else {
-              // Content chunk
-              yield data;
             }
+          } else {
+            break;
           }
         }
       }

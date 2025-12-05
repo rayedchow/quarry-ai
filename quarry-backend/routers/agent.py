@@ -28,7 +28,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "query_dataset",
-            "description": "Execute a READ-ONLY SQL query on a specific dataset to retrieve data. Use this to answer questions about the data. Note: This requires payment via x402 protocol.",
+            "description": "Retrieve actual data rows from a dataset by executing a SQL query. Use this to fetch the actual data (text, values, etc.) that you need to analyze. Returns the actual row data, not just counts. Note: Requires x402 payment.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -38,7 +38,7 @@ TOOLS = [
                     },
                     "sql_query": {
                         "type": "string",
-                        "description": "The SELECT SQL query to execute. Must be read-only (no INSERT, UPDATE, DELETE, DROP, etc.)",
+                        "description": "A SELECT query to retrieve actual data rows (e.g. 'SELECT text FROM table WHERE label = \"positive\" LIMIT 10'). DO NOT use COUNT(*) - this tool returns the actual data rows, not counts. Write SELECT queries that fetch the columns you need to analyze.",
                     },
                 },
                 "required": ["dataset_id", "sql_query"],
@@ -75,73 +75,127 @@ def execute_query_tool(
         if not dataset:
             return {"error": f"Dataset {dataset_slug} not found"}
 
-        # Parse LIMIT from original query FIRST
+        # Advanced cost estimation using DuckDB metadata
         query_limit = None
         limit_match = re.search(r"LIMIT\s+(\d+)", sql_upper)
         if limit_match:
             query_limit = int(limit_match.group(1))
             logger.info(f"Found LIMIT in query: {query_limit}")
-        else:
-            logger.info("No LIMIT found in query")
 
-        # For row estimation, if there's a LIMIT, just use that
-        # Otherwise use EXPLAIN or COUNT
-        if query_limit and query_limit <= 100:
-            # Query has small LIMIT, just use it
+        # Strategy 1: If query has LIMIT, use it directly (no execution needed)
+        if query_limit:
             actual_count = query_limit
-            logger.info(f"Using LIMIT as estimate: {actual_count}")
-        else:
-            # Need to estimate actual matching rows
-            try:
-                # Use COUNT query (faster and more reliable than parsing EXPLAIN)
-                count_query = sql_query.strip()
+            logger.info(f"[ESTIMATE] Using LIMIT as estimate: {actual_count}")
 
-                # Remove LIMIT and OFFSET
+        # Strategy 2+: For queries without small LIMIT, need to estimate
+        else:
+            try:
+                count_query = sql_query.strip()
                 if "LIMIT" in sql_upper:
                     count_query = count_query[: sql_query.upper().find("LIMIT")]
                 if "OFFSET" in sql_upper:
                     count_query = count_query[: sql_query.upper().find("OFFSET")]
 
-                # Replace SELECT columns with COUNT(*)
                 if count_query.upper().startswith("SELECT"):
                     from_idx = count_query.upper().find("FROM")
                     if from_idx > 0:
                         count_query = f"SELECT COUNT(*) {count_query[from_idx:]}"
 
-                logger.info(f"Running COUNT query: {count_query}")
-
+                # Try EXPLAIN (FORMAT JSON) first - true quote mode, no execution
+                logger.info("[ESTIMATE] Trying EXPLAIN (FORMAT JSON) - quote mode")
+                explain_query = f"EXPLAIN (FORMAT JSON) {sql_query}"
                 col_names, rows, _ = db.query_dataset(
-                    dataset_slug=dataset_slug, sql=count_query.strip(), limit=1
+                    dataset_slug=dataset_slug, sql=explain_query, limit=1
                 )
 
-                if rows and len(rows) > 0 and len(rows[0]) > 0:
-                    actual_count = int(rows[0][0])
-                    logger.info(f"COUNT query returned: {actual_count}")
+                if rows and len(rows) > 0:
+                    import json as json_lib
+
+                    plan_json = json_lib.loads(rows[0][0])
+
+                    # Extract estimated cardinality from JSON plan
+                    def find_cardinality(node):
+                        if isinstance(node, dict):
+                            if "cardinality" in node:
+                                return node["cardinality"]
+                            if "estimated_cardinality" in node:
+                                return node["estimated_cardinality"]
+                            for value in node.values():
+                                result = find_cardinality(value)
+                                if result:
+                                    return result
+                        elif isinstance(node, list):
+                            for item in node:
+                                result = find_cardinality(item)
+                                if result:
+                                    return result
+                        return None
+
+                    estimated_cardinality = find_cardinality(plan_json)
+                    if estimated_cardinality:
+                        actual_count = int(estimated_cardinality)
+                        logger.info(
+                            f"[ESTIMATE] EXPLAIN cardinality (no execution): {actual_count}"
+                        )
+                    else:
+                        raise ValueError("No cardinality in EXPLAIN plan")
                 else:
-                    actual_count = dataset.row_count
-                    logger.info(
-                        f"COUNT query failed, using dataset total: {actual_count}"
-                    )
+                    raise ValueError("EXPLAIN returned no results")
 
             except Exception as e:
-                logger.error(f"COUNT query failed: {e}")
-                # Fall back to parquet metadata
-                actual_count = dataset.row_count
-                logger.info(f"Falling back to dataset.row_count: {actual_count}")
+                logger.warning(
+                    f"[ESTIMATE] EXPLAIN failed: {e}, falling back to COUNT (will execute)"
+                )
 
-        # Estimate is the minimum of: actual count, query limit, and 100 (our max)
+                # Fallback: COUNT query (accurate but DOES execute the query)
+                try:
+                    logger.info("[ESTIMATE] Running COUNT query (executes scan)")
+                    count_query = sql_query.strip()
+                    if "LIMIT" in sql_upper:
+                        count_query = count_query[: sql_query.upper().find("LIMIT")]
+                    if "OFFSET" in sql_upper:
+                        count_query = count_query[: sql_query.upper().find("OFFSET")]
+
+                    if count_query.upper().startswith("SELECT"):
+                        from_idx = count_query.upper().find("FROM")
+                        if from_idx > 0:
+                            count_query = f"SELECT COUNT(*) {count_query[from_idx:]}"
+
+                    col_names, rows, _ = db.query_dataset(
+                        dataset_slug=dataset_slug, sql=count_query.strip(), limit=1
+                    )
+
+                    if rows and len(rows) > 0 and len(rows[0]) > 0:
+                        actual_count = int(rows[0][0])
+                        logger.info(
+                            f"[ESTIMATE] COUNT returned (executed): {actual_count}"
+                        )
+                    else:
+                        raise ValueError("COUNT returned no results")
+
+                except Exception as e2:
+                    logger.warning(
+                        f"[ESTIMATE] COUNT failed: {e2}, using dataset metadata"
+                    )
+                    # Final fallback: use dataset row count from parquet metadata
+                    actual_count = dataset.row_count
+                    logger.info(f"[ESTIMATE] Fallback to dataset total: {actual_count}")
+
+        # Final estimate: min of actual count and query limit (no artificial cap)
         if query_limit:
-            estimated_rows = min(actual_count, query_limit, 100)
+            estimated_rows = min(actual_count, query_limit)
         else:
-            estimated_rows = min(actual_count, 100)
+            # If no LIMIT specified, we'll return all matching rows
+            # For very large results, may want to warn user about cost
+            estimated_rows = actual_count
 
         logger.info(
-            f"Final estimation - actual_count: {actual_count}, query_limit: {query_limit}, estimated_rows: {estimated_rows}"
+            f"[ESTIMATE] Final: {estimated_rows} rows (actual: {actual_count}, limit: {query_limit})"
         )
 
         total_cost = estimated_rows * price_per_row
         logger.info(
-            f"Total cost: {total_cost} SOL ({estimated_rows} rows × {price_per_row} SOL/row)"
+            f"[COST] Total: {total_cost} SOL ({estimated_rows} rows × {price_per_row} SOL/row)"
         )
 
         # Create x402 payment request
@@ -153,10 +207,16 @@ def execute_query_tool(
         )
 
         # Store query info with challenge ID for later execution
-        x402.pending_payments[payment_request["challenge_id"]]["dataset_slug"] = (
-            dataset_slug
+        challenge_id = payment_request["challenge_id"]
+        logger.info(f"[PAYMENT CREATE] Storing challenge {challenge_id}")
+        logger.info(f"[PAYMENT CREATE] SQL: {sql_query}")
+
+        x402.pending_payments[challenge_id]["dataset_slug"] = dataset_slug
+        x402.pending_payments[challenge_id]["sql_query"] = sql_query
+
+        logger.info(
+            f"[PAYMENT CREATE] Pending payments now: {list(x402.pending_payments.keys())}"
         )
-        x402.pending_payments[payment_request["challenge_id"]]["sql_query"] = sql_query
 
         # Return payment required with x402 protocol info
         return {
@@ -183,14 +243,18 @@ async def stream_agent_response(request: AgentChatRequest):
 
     # Build system prompt with dataset context
     system_prompt = """You are Quarry, an AI assistant specialized in helping users analyze and query datasets. 
-You have access to tools to query datasets and retrieve data.
-Be helpful, concise, and accurate. When users ask about data, use the query_dataset tool to fetch actual data.
+You have access to the query_dataset tool which retrieves actual data rows (not counts).
 
-IMPORTANT: Format your responses with proper line breaks:
-- Use blank lines between paragraphs
-- Put each numbered or bulleted list item on a new line
-- Add line breaks after headings
-- Structure your responses for readability"""
+CRITICAL: When using query_dataset:
+- Write SELECT queries that fetch the actual data columns (e.g. SELECT text, label FROM table)
+- DO NOT write COUNT(*) queries - the tool returns actual row data UNLESS explicitly asked to do so
+- The tool will return the actual data rows you can analyze
+
+IMPORTANT: Use proper markdown formatting:
+- Put blank lines (double newline) between paragraphs
+- Put blank lines before and after headers
+- Put blank lines before and after lists
+- Use proper markdown syntax"""
 
     # Add dataset schemas if datasets are attached
     if request.datasets_info:
@@ -255,7 +319,14 @@ IMPORTANT: Format your responses with proper line breaks:
 
             # Handle content
             if delta.content:
-                yield f"data: {delta.content}\n\n"
+                # Convert single newlines to double for markdown paragraph breaks
+                fixed_content = delta.content.replace("\n", "\n\n")
+                # Debug log
+                if "\n" in delta.content:
+                    print(
+                        f"[STREAM] Original had newline, converted: {repr(delta.content)} -> {repr(fixed_content)}"
+                    )
+                yield f"data: {fixed_content}\n\n"
 
             # Check if stream is finished
             if chunk.choices[0].finish_reason == "tool_calls":
@@ -341,8 +412,19 @@ async def confirm_payment(payment: PaymentConfirmation):
     - **query_id**: The challenge ID from the x402 payment request
     - **transaction_signature**: The Solana transaction signature
     """
+    logger.info("[PAYMENT CONFIRM] Received confirmation request")
+    logger.info(f"[PAYMENT CONFIRM] Challenge ID: {payment.query_id}")
+    logger.info(f"[PAYMENT CONFIRM] Transaction: {payment.transaction_signature}")
+    logger.info(
+        f"[PAYMENT CONFIRM] Pending payments: {list(x402.pending_payments.keys())}"
+    )
+
     # Get the stored payment info before verification
     if payment.query_id not in x402.pending_payments:
+        logger.error("[PAYMENT CONFIRM] Challenge ID not found in pending payments!")
+        logger.error(
+            f"[PAYMENT CONFIRM] Available challenge IDs: {list(x402.pending_payments.keys())}"
+        )
         raise HTTPException(status_code=404, detail="Query not found or expired")
 
     payment_info = x402.pending_payments[payment.query_id].copy()
@@ -361,18 +443,21 @@ async def confirm_payment(payment: PaymentConfirmation):
 
     # Execute the query
     try:
+        # Execute query WITHOUT artificial limit - let the user's query run as-is
+        # (the query itself may have LIMIT, or we'll return all matching rows)
         col_names, rows, total = db.query_dataset(
             dataset_slug=payment_info["dataset_slug"],
             sql=payment_info["sql_query"],
-            limit=100,
+            limit=10000,  # High limit to not restrict user queries
         )
 
+        # Return ALL rows retrieved (user paid for them!)
         return {
             "success": True,
             "columns": col_names,
-            "rows": rows[:10],
+            "rows": rows,  # Return ALL rows
             "total_rows": total,
-            "returned_rows": len(rows[:10]),
+            "returned_rows": len(rows),
             "transaction": payment.transaction_signature,
         }
     except Exception as e:

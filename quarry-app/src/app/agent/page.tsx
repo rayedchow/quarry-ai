@@ -197,12 +197,16 @@ function AgentPageContent() {
       let fullContent = "";
       let isFirstChunk = true;
       
+      console.log("=== STARTING STREAM ===");
+      
       for await (const chunk of api.streamAgentMessage({
         message: userMessage,
         history: history,
         attached_datasets: selectedDatasets,
         datasets_info: datasetsInfo
       })) {
+        console.log("Received chunk:", typeof chunk, chunk);
+        
         // Check if chunk is a payment request
         if (typeof chunk === 'object' && 'payment_required' in chunk) {
           const paymentReq = chunk as PaymentRequest;
@@ -272,29 +276,24 @@ function AgentPageContent() {
       .filter((d): d is Dataset => d !== undefined);
   }, [selectedDatasets, datasets]);
 
-  // Helper function to format markdown
+  // No formatting needed - backend already converts \n to \n\n
   const formatMarkdown = (content: string): string => {
-    let markdownContent = content;
+    return content;
+  };
+
+  // Format SOL amounts to show at least 1 significant figure
+  const formatSOL = (amount: number): string => {
+    if (amount === 0) return "0 SOL";
     
-    // Add line breaks before markdown headers if not already there
-    markdownContent = markdownContent.replace(/([^\n])(#{1,6}\s)/g, "$1\n\n$2");
+    // Find the number of decimal places needed to show at least 1 significant figure
+    const absAmount = Math.abs(amount);
+    if (absAmount >= 1) {
+      return `${amount.toFixed(4)} SOL`;
+    }
     
-    // Add line breaks before numbered lists if not already there
-    markdownContent = markdownContent.replace(/([^\n])(\d+\.\s)/g, "$1\n\n$2");
-    
-    // Add line breaks before bullet points if not already there
-    markdownContent = markdownContent.replace(/([^\n])([-•*]\s)/g, "$1\n\n$2");
-    
-    // Add line breaks before code blocks if not already there
-    markdownContent = markdownContent.replace(/([^\n])(```)/g, "$1\n\n$2");
-    
-    // Replace single newlines with double newlines for proper paragraph breaks
-    markdownContent = markdownContent.replace(/\n(?!\n)/g, "\n\n");
-    
-    // Clean up excessive newlines (more than 2 in a row)
-    markdownContent = markdownContent.replace(/\n{3,}/g, "\n\n");
-    
-    return markdownContent;
+    // For small numbers, find first non-zero digit
+    const decimals = Math.ceil(-Math.log10(absAmount)) + 1;
+    return `${amount.toFixed(Math.min(decimals, 10))} SOL`;
   };
 
   const handlePayment = async (payReq: PaymentRequest) => {
@@ -347,11 +346,19 @@ function AgentPageContent() {
       transaction.feePayer = publicKey;
       
       console.log(`Sending transaction...`);
+      console.log(`Transaction details:`, transaction);
       
       // Send transaction (wallet will prompt user to sign)
-      const signature = await sendTransaction(transaction, connection);
-      
-      console.log(`Transaction sent: ${signature}`);
+      let signature;
+      try {
+        signature = await sendTransaction(transaction, connection);
+        console.log(`Transaction sent: ${signature}`);
+      } catch (txError: any) {
+        console.error(`Transaction send failed:`, txError);
+        console.error(`Error message:`, txError.message);
+        console.error(`Error details:`, txError);
+        throw new Error(`Failed to send transaction: ${txError.message || 'User rejected or transaction failed'}`);
+      }
       
       // Wait for confirmation
       console.log(`Waiting for confirmation...`);
@@ -468,13 +475,20 @@ function AgentPageContent() {
       allQueries.forEach((queryData, idx) => {
         dataAnalysisPrompt += `Query ${idx + 1}:\n`;
         dataAnalysisPrompt += `SQL: ${queryData.query}\n`;
+        dataAnalysisPrompt += `Total matching rows: ${queryData.result.total_rows}\n`;
         dataAnalysisPrompt += `Returned ${queryData.result.returned_rows} rows\n\n`;
         
         if (queryData.result.rows && queryData.result.rows.length > 0) {
-          dataAnalysisPrompt += `Data:\n`;
-          queryData.result.rows.forEach((row: any, rowIdx: number) => {
+          // Limit to first 100 rows for OpenAI context (but user gets all rows in UI)
+          const rowsForAI = queryData.result.rows.slice(0, 100);
+          dataAnalysisPrompt += `Data (showing first ${rowsForAI.length} rows for analysis):\n`;
+          rowsForAI.forEach((row: any, rowIdx: number) => {
             dataAnalysisPrompt += `  ${rowIdx + 1}. ${JSON.stringify(row)}\n`;
           });
+          
+          if (queryData.result.rows.length > 100) {
+            dataAnalysisPrompt += `\n  ... and ${queryData.result.rows.length - 100} more rows (not shown to save context)\n`;
+          }
         }
         dataAnalysisPrompt += `\n`;
       });
@@ -493,13 +507,17 @@ function AgentPageContent() {
       console.log("datasets_info being sent:", pendingDatasetsInfo);
       
       // Stream the agent's response WITH tools still available
+      console.log("=== STARTING CONTINUATION STREAM ===");
       let finalContent = "";
+      
       for await (const chunk of api.streamAgentMessage({
         message: "",
         history: updatedHistory,
         attached_datasets: selectedDatasets,
         datasets_info: pendingDatasetsInfo // Keep tools available!
       })) {
+        console.log("Continuation chunk:", typeof chunk, JSON.stringify(chunk).slice(0, 100));
+        
         if (typeof chunk === 'object' && 'payment_required' in chunk) {
           // Agent wants more data in the continuation - shouldn't happen but handle it
           const nextPaymentReq = chunk as PaymentRequest;
@@ -533,6 +551,11 @@ function AgentPageContent() {
         }
         
         finalContent += chunk as string;
+        
+        if (finalContent.length < 200 || finalContent.length % 100 === 0) {
+          console.log("Final content so far:", JSON.stringify(finalContent).slice(0, 200));
+        }
+        
         const markdownContent = formatMarkdown(finalContent);
         setMessages((prev) => 
           prev.map((msg) =>
@@ -542,6 +565,8 @@ function AgentPageContent() {
           )
         );
       }
+      
+      console.log("Final content complete:", JSON.stringify(finalContent));
       
       // Clear after successful completion
       setPaymentRequests([]);
@@ -640,7 +665,7 @@ function AgentPageContent() {
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
                           <span className="text-xs text-green-400 font-medium">
-                            Processed {queryResult.returned_rows} rows for {queryResult.cost.toFixed(6)} SOL
+                            Processed {queryResult.returned_rows} rows for {formatSOL(queryResult.cost)}
                           </span>
                         </div>
                         <Button
@@ -684,7 +709,7 @@ function AgentPageContent() {
                         <div className="border-t border-white/10 pt-2.5 mt-2.5">
                           <div className="flex justify-between items-end">
                             <span className="text-white/80 font-medium">Cost</span>
-                            <div className="text-cyan-400 font-semibold">{payReq.total_cost.toFixed(6)} SOL</div>
+                            <div className="text-cyan-400 font-semibold">{formatSOL(payReq.total_cost)}</div>
                           </div>
                         </div>
                       </div>
@@ -703,7 +728,7 @@ function AgentPageContent() {
                             </>
                           ) : (
                             <>
-                              Pay {payReq.total_cost.toFixed(6)} SOL
+                              Pay {formatSOL(payReq.total_cost)}
                             </>
                           )}
                         </Button>
@@ -728,10 +753,8 @@ function AgentPageContent() {
                 </div>
               ) : (
                 <div className="max-w-[85%] text-white/80">
-                  <div className="text-sm leading-relaxed prose prose-invert prose-sm max-w-none prose-p:my-3 prose-p:leading-7 prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-headings:my-4 prose-code:text-cyan-400 prose-code:bg-white/5 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-strong:text-white prose-strong:font-semibold prose-pre:my-4">
-                    <ReactMarkdown 
-                      remarkPlugins={[remarkGfm]}
-                    >
+                  <div className="text-sm leading-relaxed [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6 [&_li]:mb-1 [&_strong]:font-medium [&_strong]:text-white [&_em]:italic [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:my-4 [&_h1]:text-white [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:my-3 [&_h2]:text-white [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:my-2 [&_h3]:text-white [&_p]:mb-3 [&_p]:leading-relaxed [&_code]:text-cyan-400 [&_code]:bg-white/5 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-white/5 [&_pre]:border [&_pre]:border-white/10 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:my-3">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {message.content}
                     </ReactMarkdown>
                   </div>
