@@ -57,6 +57,7 @@ def execute_query_tool(
     currency: str = "SOL",
 ) -> dict:
     """Execute a SQL query on a dataset and return x402 payment request."""
+    logger.info(f"[EXECUTE_QUERY_TOOL] Currency received: {currency}")
     try:
         # Validate it's a read-only query
         sql_upper = sql_query.upper().strip()
@@ -195,10 +196,24 @@ def execute_query_tool(
             f"[ESTIMATE] Final: {estimated_rows} rows (actual: {actual_count}, limit: {query_limit})"
         )
 
-        total_cost = estimated_rows * price_per_row
+        # Calculate cost in SOL (base currency)
+        total_cost_sol = estimated_rows * price_per_row
         logger.info(
-            f"[COST] Total: {total_cost} SOL ({estimated_rows} rows × {price_per_row} SOL/row)"
+            f"[COST] Total: {total_cost_sol} SOL ({estimated_rows} rows × {price_per_row} SOL/row)"
         )
+
+        # Convert to selected currency
+        if currency == "USDC":
+            # Convert SOL to USDC using configured rate
+            from config import settings
+
+            sol_rate = settings.sol_to_usdc_rate
+            total_cost = total_cost_sol * sol_rate
+            logger.info(
+                f"[COST] Converted to USDC: {total_cost} USDC (rate: 1 SOL = {sol_rate} USDC)"
+            )
+        else:
+            total_cost = total_cost_sol
 
         # Get publisher wallet from dataset
         publisher_wallet = dataset.publisher_wallet
@@ -374,7 +389,14 @@ IMPORTANT: Use proper markdown formatting:
                         else:
                             # Execute query (will return x402 payment request)
                             # Get currency from request (default to SOL for backwards compatibility)
-                            currency = getattr(request, "currency", "SOL")
+                            currency = (
+                                request.currency
+                                if hasattr(request, "currency") and request.currency
+                                else "SOL"
+                            )
+                            logger.info(
+                                f"[CURRENCY] Selected currency from request: {currency}"
+                            )
                             result = execute_query_tool(
                                 dataset_slug=dataset_slug,
                                 dataset_name=dataset_name,

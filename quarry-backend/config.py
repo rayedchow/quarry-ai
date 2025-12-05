@@ -40,6 +40,11 @@ class Settings(BaseSettings):
         "SAS1111111111111111111111111111111111111111"  # SAS program ID
     )
 
+    # Currency Exchange Rates
+    sol_to_usdc_rate: float = (
+        140.0  # SOL/USDC exchange rate (update periodically or use oracle)
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

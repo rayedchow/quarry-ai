@@ -45,6 +45,7 @@ type QueryResult = {
   transaction: string;
   sql_query: string;
   cost: number;
+  currency?: string;
 };
 
 type Message = {
@@ -312,6 +313,24 @@ function AgentPageContent() {
 
   // Legacy function for backwards compatibility
   const formatSOL = (amount: number): string => formatCurrency(amount, "SOL");
+  
+  // Calculate payment amount with currency conversion
+  const calculatePaymentAmount = (
+    originalAmount: number,
+    originalCurrency: string,
+    targetCurrency: string
+  ): number => {
+    const SOL_TO_USDC_RATE = 140.0;
+    
+    if (originalCurrency === targetCurrency) {
+      return originalAmount;
+    } else if (originalCurrency === "SOL" && targetCurrency === "USDC") {
+      return originalAmount * SOL_TO_USDC_RATE;
+    } else if (originalCurrency === "USDC" && targetCurrency === "SOL") {
+      return originalAmount / SOL_TO_USDC_RATE;
+    }
+    return originalAmount;
+  };
 
   const handlePayment = async (payReq: PaymentRequest) => {
     if (!payReq || currentAIMessageId === null) return;
@@ -344,14 +363,30 @@ function AgentPageContent() {
         throw new Error(`Invalid recipient address: ${payReq.payment_details.recipient}. Please check PAYMENT_WALLET_ADDRESS in backend .env`);
       }
       
-      const currency = payReq.payment_details.currency || payReq.currency || "SOL";
+      // Use the currency from the payment request (may have been changed by user in modal)
+      const currency = payReq.currency || "SOL";
+      const SOL_TO_USDC_RATE = 140.0; // Should match backend rate
+      
+      // Calculate the actual payment amount based on selected currency
+      let paymentAmount = payReq.total_cost;
+      
+      // If user switched currency after backend created request, convert
+      if (payReq.payment_details.currency === "SOL" && currency === "USDC") {
+        // Backend sent SOL amount, user wants USDC
+        paymentAmount = payReq.total_cost * SOL_TO_USDC_RATE;
+      } else if (payReq.payment_details.currency === "USDC" && currency === "SOL") {
+        // Backend sent USDC amount, user wants SOL
+        paymentAmount = payReq.total_cost / SOL_TO_USDC_RATE;
+      }
+      
+      console.log(`[PAYMENT] Using currency: ${currency}, Amount: ${paymentAmount}`);
       const transaction = new Transaction();
       
       if (currency === "USDC") {
         // USDC SPL Token Transfer
-        console.log(`Creating USDC transfer: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${payReq.payment_details.amount} USDC)`);
+        console.log(`Creating USDC transfer: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${paymentAmount} USDC)`);
         
-        const amount = payReq.payment_details.amount_tokens || Math.floor(payReq.payment_details.amount * 1_000_000); // 6 decimals
+        const amount = Math.floor(paymentAmount * 1_000_000); // Convert to 6 decimals
         
         // Get sender's USDC token account
         const fromTokenAccount = await getAssociatedTokenAddress(
@@ -400,7 +435,7 @@ function AgentPageContent() {
         );
       } else {
         // Native SOL Transfer
-        const lamports = payReq.payment_details.amount_lamports || Math.floor(payReq.payment_details.amount * 1_000_000_000);
+        const lamports = Math.floor(paymentAmount * 1_000_000_000); // Convert to 9 decimals
         console.log(`Creating SOL transfer: ${publicKey.toBase58()} → ${recipientPubkey.toBase58()} (${lamports} lamports)`);
         
         transaction.add(
@@ -427,7 +462,7 @@ function AgentPageContent() {
           const fromTokenAccount = await getAssociatedTokenAddress(USDC_MINT, publicKey);
           const tokenAccountInfo = await connection.getTokenAccountBalance(fromTokenAccount);
           const usdcBalance = parseInt(tokenAccountInfo.value.amount);
-          const amount = payReq.payment_details.amount_tokens || Math.floor(payReq.payment_details.amount * 1_000_000);
+          const amount = Math.floor(paymentAmount * 1_000_000); // Convert to smallest unit
           
           console.log(`USDC balance: ${usdcBalance} (${(usdcBalance / 1e6).toFixed(2)} USDC)`);
           
@@ -453,7 +488,7 @@ function AgentPageContent() {
           const balance = await connection.getBalance(publicKey);
           console.log(`Wallet balance: ${balance} lamports (${(balance / 1e9).toFixed(6)} SOL)`);
           
-          const lamports = payReq.payment_details.amount_lamports || Math.floor(payReq.payment_details.amount * 1_000_000_000);
+          const lamports = Math.floor(paymentAmount * 1_000_000_000);
           const estimatedFee = 5000; // 5000 lamports ~= 0.000005 SOL
           const totalNeeded = lamports + estimatedFee;
           
@@ -521,7 +556,7 @@ function AgentPageContent() {
         query_id: challengeId,
         transaction_signature: signature,
         payer_wallet: publicKey.toBase58(),  // Include wallet for usage receipt
-        currency: selectedCurrency
+        currency: currency  // Use currency from payment request
       });
       
       console.log(`Backend verification successful:`, result);
@@ -537,7 +572,8 @@ function AgentPageContent() {
         returned_rows: result.returned_rows,
         transaction: signature,
         sql_query: payReq.sql_query,
-        cost: payReq.total_cost
+        cost: paymentAmount,  // Use the actual amount paid
+        currency: currency  // Include the currency used
       };
       
       // IMMEDIATELY update the message to show completion (don't wait for stream)
@@ -819,7 +855,7 @@ function AgentPageContent() {
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
                           <span className="text-xs text-green-400 font-medium">
-                            Processed {queryResult.returned_rows} rows for {formatSOL(queryResult.cost)}
+                            Processed {queryResult.returned_rows} rows for {formatCurrency(queryResult.cost, queryResult.currency || "SOL")}
                           </span>
                         </div>
                         <Button
@@ -850,32 +886,71 @@ function AgentPageContent() {
                         <p className="text-sm text-white/70">Query execution requires payment</p>
                       </div>
 
-                      {/* Currency Selector */}
+                      {/* Currency Selector in Modal */}
                       <div className="mb-4">
-                        <label className="text-xs text-white/60 mb-2 block">Payment Currency</label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setSelectedCurrency("SOL")}
-                            className={cn(
-                              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                              selectedCurrency === "SOL"
-                                ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/20"
-                                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
-                            )}
-                          >
-                            SOL
-                          </button>
-                          <button
-                            onClick={() => setSelectedCurrency("USDC")}
-                            className={cn(
-                              "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                              selectedCurrency === "USDC"
-                                ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20"
-                                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
-                            )}
-                          >
-                            USDC
-                          </button>
+                        <label className="text-xs text-white/60 mb-2 block">Select Payment Currency</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(() => {
+                            // Calculate amounts based on ORIGINAL backend currency
+                            const SOL_TO_USDC_RATE = 140.0;
+                            const originalCurrency = payReq.payment_details.currency || "SOL";
+                            const originalAmount = payReq.total_cost;
+                            
+                            // Convert to both currencies
+                            const solAmount = originalCurrency === "SOL" 
+                              ? originalAmount 
+                              : originalAmount / SOL_TO_USDC_RATE;
+                            const usdcAmount = originalCurrency === "USDC"
+                              ? originalAmount
+                              : originalAmount * SOL_TO_USDC_RATE;
+                            
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPaymentRequests(prev => prev.map(p => 
+                                      p.payment_details.challenge_id === payReq.payment_details.challenge_id
+                                        ? { ...p, currency: "SOL" }
+                                        : p
+                                    ));
+                                  }}
+                                  className={cn(
+                                    "flex flex-col items-center gap-1 px-4 py-3 rounded-lg text-sm font-medium transition-all border",
+                                    payReq.currency === "SOL"
+                                      ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/20 border-violet-500"
+                                      : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80 border-white/10"
+                                  )}
+                                >
+                                  <span>◎ SOL</span>
+                                  <span className="text-xs opacity-80">
+                                    {formatCurrency(solAmount, "SOL")}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPaymentRequests(prev => prev.map(p => 
+                                      p.payment_details.challenge_id === payReq.payment_details.challenge_id
+                                        ? { ...p, currency: "USDC" }
+                                        : p
+                                    ));
+                                  }}
+                                  className={cn(
+                                    "flex flex-col items-center gap-1 px-4 py-3 rounded-lg text-sm font-medium transition-all border",
+                                    payReq.currency === "USDC"
+                                      ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20 border-cyan-500"
+                                      : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80 border-white/10"
+                                  )}
+                                >
+                                  <span>🔵 USDC</span>
+                                  <span className="text-xs opacity-80">
+                                    {formatCurrency(usdcAmount, "USDC")}
+                                  </span>
+                                </button>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -892,7 +967,24 @@ function AgentPageContent() {
                         <div className="border-t border-white/10 pt-2.5 mt-2.5">
                           <div className="flex justify-between items-end">
                             <span className="text-white/80 font-medium">Cost</span>
-                            <div className="text-cyan-400 font-semibold">{formatCurrency(payReq.total_cost, selectedCurrency)}</div>
+                            <div className="text-cyan-400 font-semibold">
+                              {(() => {
+                                const SOL_TO_USDC_RATE = 140.0;
+                                const originalCurrency = payReq.payment_details.currency || "SOL";
+                                const originalAmount = payReq.total_cost;
+                                const selectedCurrency = payReq.currency || "SOL";
+                                
+                                // Calculate display amount based on selected currency
+                                let displayAmount = originalAmount;
+                                if (originalCurrency === "SOL" && selectedCurrency === "USDC") {
+                                  displayAmount = originalAmount * SOL_TO_USDC_RATE;
+                                } else if (originalCurrency === "USDC" && selectedCurrency === "SOL") {
+                                  displayAmount = originalAmount / SOL_TO_USDC_RATE;
+                                }
+                                
+                                return formatCurrency(displayAmount, selectedCurrency);
+                              })()}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -911,7 +1003,21 @@ function AgentPageContent() {
                             </>
                           ) : (
                             <>
-                              Pay {formatCurrency(payReq.total_cost, selectedCurrency)}
+                              Pay {(() => {
+                                const SOL_TO_USDC_RATE = 140.0;
+                                const originalCurrency = payReq.payment_details.currency || "SOL";
+                                const originalAmount = payReq.total_cost;
+                                const selectedCurrency = payReq.currency || "SOL";
+                                
+                                let displayAmount = originalAmount;
+                                if (originalCurrency === "SOL" && selectedCurrency === "USDC") {
+                                  displayAmount = originalAmount * SOL_TO_USDC_RATE;
+                                } else if (originalCurrency === "USDC" && selectedCurrency === "SOL") {
+                                  displayAmount = originalAmount / SOL_TO_USDC_RATE;
+                                }
+                                
+                                return formatCurrency(displayAmount, selectedCurrency);
+                              })()}
                             </>
                           )}
                         </Button>
@@ -1068,8 +1174,8 @@ function AgentPageContent() {
                     <Send className="h-4 w-4" />
                 )}
               </Button>
-              </div>
             </div>
+          </div>
           </form>
         </div>
       </div>

@@ -14,6 +14,22 @@ type DatasetCardProps = {
   compact?: boolean;
 };
 
+// Format SOL amounts to show at least 1 significant figure
+function formatSOL(amount: number): string {
+  if (amount === 0) return "0";
+  
+  const absAmount = Math.abs(amount);
+  
+  // For amounts >= 1, show 4 decimals
+  if (absAmount >= 1) {
+    return amount.toFixed(4);
+  }
+  
+  // For small numbers, find first non-zero digit and show at least 1 sig fig
+  const decimals = Math.ceil(-Math.log10(absAmount)) + 1;
+  return amount.toFixed(Math.min(decimals, 10));
+}
+
 export function DatasetCard({
   dataset,
   className,
@@ -90,7 +106,7 @@ export function DatasetCard({
         <div className="flex items-center gap-1.5 text-sm">
           <Coins className="h-3.5 w-3.5 text-emerald-400/70" />
           <span className="font-medium text-white">
-            {dataset.pricePerRow.toFixed(3)}
+            {formatSOL(dataset.pricePerRow)}
           </span>
           <span className="text-white/40 text-xs">SOL/row</span>
         </div>
