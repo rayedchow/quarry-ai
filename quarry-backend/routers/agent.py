@@ -54,6 +54,7 @@ def execute_query_tool(
     dataset_name: str,
     sql_query: str,
     price_per_row: float,
+    currency: str = "SOL",
 ) -> dict:
     """Execute a SQL query on a dataset and return x402 payment request."""
     try:
@@ -204,17 +205,21 @@ def execute_query_tool(
         if not publisher_wallet:
             # Fallback to platform wallet if publisher didn't set one
             from config import settings
+
             publisher_wallet = settings.payment_wallet_address
             if not publisher_wallet:
-                raise ValueError("No payment recipient configured. Dataset publisher must set wallet address.")
+                raise ValueError(
+                    "No payment recipient configured. Dataset publisher must set wallet address."
+                )
 
         # Create x402 payment request with publisher's wallet
         resource_id = f"{dataset_slug}:{sql_query[:50]}"
         payment_request = x402.create_payment_request(
-            amount_sol=total_cost,
+            amount=total_cost,
             resource_id=resource_id,
             description=f"Query {dataset_name} ({estimated_rows} rows)",
             recipient_wallet=publisher_wallet,  # Pay publisher directly
+            currency=currency,
         )
 
         # Store query info with challenge ID for later execution
@@ -239,6 +244,7 @@ def execute_query_tool(
             "estimated_rows": estimated_rows,
             "price_per_row": price_per_row,
             "total_cost": total_cost,
+            "currency": currency,
             "payment_details": payment_request,
         }
 
@@ -367,11 +373,14 @@ IMPORTANT: Use proper markdown formatting:
                             result = {"error": "Dataset info not found"}
                         else:
                             # Execute query (will return x402 payment request)
+                            # Get currency from request (default to SOL for backwards compatibility)
+                            currency = getattr(request, "currency", "SOL")
                             result = execute_query_tool(
                                 dataset_slug=dataset_slug,
                                 dataset_name=dataset_name,
                                 sql_query=sql_query,
                                 price_per_row=price_per_row,
+                                currency=currency,
                             )
 
                         # Send x402 payment required indicator to user

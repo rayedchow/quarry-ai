@@ -190,6 +190,7 @@ class AgentChatRequest(BaseModel):
     history: list[ChatMessage] = Field(default_factory=list)
     attached_datasets: list[str] = Field(default_factory=list)
     datasets_info: list[DatasetInfo] = Field(default_factory=list)
+    currency: str = "SOL"  # "SOL" or "USDC"
 
 
 class AgentChatResponse(BaseModel):
@@ -209,6 +210,7 @@ class PaymentRequest(BaseModel):
     estimated_rows: int
     price_per_row: float
     total_cost: float
+    currency: str = "SOL"  # "SOL" or "USDC"
 
 
 class PaymentConfirmation(BaseModel):
@@ -217,3 +219,4 @@ class PaymentConfirmation(BaseModel):
     query_id: str
     transaction_signature: str
     payer_wallet: Optional[str] = None  # Wallet that made the payment
+    currency: str = "SOL"  # "SOL" or "USDC"

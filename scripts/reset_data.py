@@ -93,7 +93,7 @@ def reset_database():
         conn.execute("DROP TABLE IF EXISTS review_helpful_votes")
         conn.execute("DROP TABLE IF EXISTS reviews")
         conn.execute("DROP TABLE IF EXISTS datasets")
-        
+
         # Recreate datasets table with all latest columns
         conn.execute("""
             CREATE TABLE datasets (
@@ -117,12 +117,12 @@ def reset_database():
                 reputation_data JSON
             )
         """)
-        
+
         # Create index on slug
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_datasets_slug ON datasets(slug)
         """)
-        
+
         # Create reviews table
         conn.execute("""
             CREATE TABLE reviews (
@@ -141,7 +141,7 @@ def reset_database():
                 FOREIGN KEY (dataset_id) REFERENCES datasets(id)
             )
         """)
-        
+
         # Create indexes for reviews
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_reviews_dataset ON reviews(dataset_id, dataset_version)
@@ -149,7 +149,7 @@ def reset_database():
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_reviews_wallet ON reviews(reviewer_wallet)
         """)
-        
+
         # Create helpful votes table
         conn.execute("""
             CREATE TABLE review_helpful_votes (
