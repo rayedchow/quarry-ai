@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Plus, Sparkles } from "lucide-react";
+import { Plus } from "lucide-react";
 import { WalletButton } from "@/components/ui/wallet-button";
 
 export function SiteHeader() {
@@ -10,14 +10,10 @@ export function SiteHeader() {
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
         <Link
           href="/"
-          className="flex items-center gap-2 text-xl font-semibold text-white transition-colors hover:text-cyan-400"
+          className="text-xl font-semibold tracking-wide text-white transition-colors hover:text-cyan-400"
+          style={{ fontFamily: 'var(--font-geist-mono)' }}
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-violet-500">
-            <Sparkles className="h-4 w-4 text-white" />
-          </div>
-          <span>
-            Quarry<span className="text-cyan-400">.ai</span>
-          </span>
+          QUARRY
         </Link>
 
         <div className="flex items-center gap-3">
