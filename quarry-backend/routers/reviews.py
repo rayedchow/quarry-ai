@@ -21,6 +21,7 @@ router = APIRouter(prefix="/reviews", tags=["reviews"])
 # Request Models
 class CreateReviewRequest(BaseModel):
     """Request to create a review."""
+
     dataset_id: str
     dataset_version: str = "v1"
     rating: int = Field(ge=1, le=5)
@@ -31,6 +32,7 @@ class CreateReviewRequest(BaseModel):
 
 class MarkHelpfulRequest(BaseModel):
     """Request to mark review as helpful."""
+
     review_id: str
     voter_wallet: str
 
@@ -40,13 +42,13 @@ class MarkHelpfulRequest(BaseModel):
 async def create_review(request: CreateReviewRequest):
     """
     Create an on-chain review for a dataset.
-    
+
     Requirements:
     - Must have usage receipt attestation (proof of purchase)
     - Rating must be 1-5 stars
     - Review text max 2000 characters
     - One review per wallet per dataset version
-    
+
     Creates:
     - IPFS entry for review text
     - On-chain attestation linking review to usage receipt
@@ -79,7 +81,7 @@ async def get_dataset_reviews(
 ):
     """
     Get all reviews for a dataset.
-    
+
     Returns:
     - List of verified reviews
     - Average rating
@@ -95,14 +97,16 @@ async def get_dataset_reviews(
         )
         return JSONResponse(status_code=200, content=reviews)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch reviews: {str(e)}"
+        )
 
 
 @router.post("/helpful")
 async def mark_review_helpful(request: MarkHelpfulRequest):
     """
     Mark a review as helpful.
-    
+
     Each wallet can only vote once per review (anti-spam).
     """
     try:
@@ -113,9 +117,7 @@ async def mark_review_helpful(request: MarkHelpfulRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to mark helpful: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to mark helpful: {str(e)}")
 
 
 @router.get("/wallet/{wallet_address}")
@@ -126,7 +128,7 @@ async def get_wallet_reviews(
 ):
     """
     Get all reviews by a specific wallet.
-    
+
     Useful for showing a user's review history.
     """
     try:
@@ -161,21 +163,18 @@ async def get_wallet_reviews(
 async def check_review_eligibility(dataset_id: str, wallet_address: str):
     """
     Check if a wallet is eligible to review a dataset.
-    
+
     Returns:
     - can_review: bool
     - reason: str
-    - usage_receipts: list of receipts
+    - usage_receipt_attestation: str (if eligible)
     """
     try:
-        # Check for usage receipts
-        # In production, query Solana for usage receipt attestations
-        # For now, check database
-        
+        # Check for existing review
         existing_review = db.get_review_by_wallet_and_dataset(
             wallet_address, dataset_id, "v1"
         )
-        
+
         if existing_review:
             return JSONResponse(
                 status_code=200,
@@ -185,16 +184,28 @@ async def check_review_eligibility(dataset_id: str, wallet_address: str):
                     "existing_review_id": existing_review["id"],
                 },
             )
-        
-        # Check for usage receipts (simplified - assume eligible if no existing review)
-        return JSONResponse(
-            status_code=200,
-            content={
-                "can_review": True,
-                "reason": "Eligible to review",
-                "usage_receipts": [],
-            },
-        )
+
+        # Check for usage receipts in database
+        # Query database for usage receipt for this wallet + dataset
+        usage_receipt = db.get_usage_receipt(wallet_address, dataset_id)
+
+        if usage_receipt:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "can_review": True,
+                    "reason": "You have purchased this dataset",
+                    "usage_receipt_attestation": usage_receipt["attestation_address"],
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "can_review": False,
+                    "reason": "You must purchase data from this dataset first",
+                },
+            )
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to check eligibility: {str(e)}"
@@ -203,4 +214,3 @@ async def check_review_eligibility(dataset_id: str, wallet_address: str):
 
 # Import at module level for middleware
 from database import db
-

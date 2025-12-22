@@ -6,7 +6,6 @@ import {
   Upload,
   Database,
   FileJson,
-  Shield,
   Tag,
   Info,
   CheckCircle2,
@@ -209,9 +208,7 @@ export default function PublishDatasetPage() {
       )}
 
       {/* Upload Form */}
-      <div className="grid gap-8 lg:grid-cols-3">
-        {/* Main Upload Area */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className="space-y-6">
           {/* File Upload */}
           <div className="glass-panel p-6 md:p-8 space-y-6">
             <div className="flex items-center gap-3">
@@ -452,99 +449,6 @@ export default function PublishDatasetPage() {
             </Button>
           </div>
         </div>
-
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* How it works */}
-          <div className="glass-panel p-6 space-y-5">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Info className="h-4 w-4 text-cyan-400" />
-              How it works
-            </h3>
-            <div className="space-y-4">
-              {[
-                {
-                  step: "1",
-                  title: "Upload data file",
-                  desc: "CSV, JSON, or SQL DDL file",
-                },
-                {
-                  step: "2",
-                  title: "Auto-detect schema",
-                  desc: "We extract columns and types automatically",
-                },
-                {
-                  step: "3",
-                  title: "Convert to Parquet",
-                  desc: "Optimized storage for fast queries",
-                },
-                {
-                  step: "4",
-                  title: "Go live",
-                  desc: "Agents can now discover and query your data",
-                },
-              ].map((item) => (
-                <div key={item.step} className="flex gap-3">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500/20 to-violet-500/20 border border-white/10 text-xs font-medium text-cyan-400">
-                    {item.step}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">
-                      {item.title}
-                    </p>
-                    <p className="text-xs text-white/50">{item.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Security Features */}
-          <div className="glass-panel p-6 space-y-5">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Shield className="h-4 w-4 text-violet-400" />
-              Security guarantees
-            </h3>
-            <div className="space-y-3">
-              {[
-                "Raw data never leaves your vault",
-                "End-to-end encryption",
-                "Audit logs for all queries",
-                "Revoke access anytime",
-              ].map((feature) => (
-                <div
-                  key={feature}
-                  className="flex items-center gap-2 text-sm text-white/60"
-                >
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400/70" />
-                  {feature}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Supported Formats */}
-          <div className="glass-panel p-6 space-y-4">
-            <h3 className="text-sm font-semibold text-white">
-              Supported formats
-            </h3>
-            <div className="space-y-3 text-sm">
-              <div className="p-3 rounded-lg bg-white/[0.03] border border-white/5">
-                <p className="font-medium text-white">.csv</p>
-                <p className="text-xs text-white/40 mt-1">Standard CSV with headers</p>
-              </div>
-              <div className="p-3 rounded-lg bg-white/[0.03] border border-white/5">
-                <p className="font-medium text-white">.json</p>
-                <p className="text-xs text-white/40 mt-1">Array of objects or schema definition</p>
-              </div>
-              <div className="p-3 rounded-lg bg-white/[0.03] border border-white/5">
-                <p className="font-medium text-white">.sql</p>
-                <p className="text-xs text-white/40 mt-1">CREATE TABLE DDL statements</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

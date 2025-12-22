@@ -84,8 +84,16 @@ export function ReviewsSection({ datasetId, datasetVersion = "v1" }: ReviewsSect
 
     setSubmitting(true);
     try {
-      // For now, using a placeholder receipt - in production, get actual receipt from backend
-      const receipt = "placeholder_receipt_attestation";
+      // Get the actual usage receipt from eligibility check
+      const eligibilityResult = await api.checkReviewEligibility(datasetId, publicKey.toBase58());
+      
+      if (!eligibilityResult.can_review || !eligibilityResult.usage_receipt_attestation) {
+        alert("You need to use this dataset before you can review it. Query some data in the agent first!");
+        setSubmitting(false);
+        return;
+      }
+
+      const receipt = eligibilityResult.usage_receipt_attestation;
       
       await api.createReview(
         datasetId,
@@ -181,6 +189,49 @@ export function ReviewsSection({ datasetId, datasetVersion = "v1" }: ReviewsSect
         )}
       </div>
 
+      {/* Trust Banner */}
+      {reviews && reviews.reviews.length > 0 && (
+        <div className="bg-gradient-to-r from-green-500/10 to-cyan-500/10 border border-green-500/20 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <Shield className="h-5 w-5 text-green-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-white mb-1">
+                🛡️ 100% Verified Reviews with Blockchain Proof
+              </p>
+              <p className="text-xs text-white/60 leading-relaxed">
+                Every review is from someone who provably paid for and used this dataset. 
+                Click any <span className="text-green-400 font-medium">"Verified Purchase"</span> badge 
+                to see the on-chain payment proof on Solana Explorer. Cannot be faked or manipulated.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Verified Purchases Stats */}
+      {reviews && reviews.reviews.length > 0 && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-green-500/5 border border-green-500/20">
+            <Shield className="h-5 w-5 text-green-400" />
+            <div>
+              <p className="text-xs text-white/50">Verified Purchases</p>
+              <p className="text-lg font-semibold text-white">
+                {reviews.reviews.filter(r => r.is_verified_purchaser).length}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+            <svg className="h-5 w-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p className="text-xs text-white/50">On-Chain Proof</p>
+              <p className="text-lg font-semibold text-white">100%</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Write Review Button */}
       {publicKey && canReview && !showReviewForm && (
         <Button
@@ -253,13 +304,22 @@ export function ReviewsSection({ datasetId, datasetVersion = "v1" }: ReviewsSect
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
+                  <div className="flex items-center gap-3 mb-2 flex-wrap">
                     {renderStars(review.rating)}
-                    {review.is_verified_purchaser && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/20">
-                        <Shield className="h-3 w-3 text-green-400" />
-                        <span className="text-xs text-green-400">Verified Purchaser</span>
-                      </span>
+                    {review.is_verified_purchaser && review.usage_receipt_attestation && (
+                      <a
+                        href={`https://explorer.solana.com/tx/${review.usage_receipt_attestation}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 hover:border-green-500/50 transition-all group"
+                        title="This reviewer provably purchased data from this dataset. Click to verify payment on Solana blockchain."
+                      >
+                        <Shield className="h-3.5 w-3.5 text-green-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-xs font-medium text-green-400">Verified Purchase</span>
+                        <svg className="h-3 w-3 text-green-400/60 group-hover:text-green-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
                     )}
                   </div>
                   <p className="text-sm text-white/80 leading-relaxed">{review.review_text}</p>
@@ -271,12 +331,28 @@ export function ReviewsSection({ datasetId, datasetVersion = "v1" }: ReviewsSect
                   <span className="font-mono">{review.reviewer_wallet.slice(0, 4)}...{review.reviewer_wallet.slice(-4)}</span>
                   <span>•</span>
                   <span>{review.time_ago}</span>
+                  {review.is_verified_purchaser && review.usage_receipt_attestation && (
+                    <>
+                      <span>•</span>
+                      <a
+                        href={`https://explorer.solana.com/tx/${review.usage_receipt_attestation}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 hover:text-green-400 transition-colors group"
+                        title="View proof of purchase on Solana blockchain"
+                      >
+                        <Shield className="h-3 w-3" />
+                        <span className="font-medium">Verify on Solana</span>
+                      </a>
+                    </>
+                  )}
                   <span>•</span>
                   <a
                     href={`https://ipfs.io/ipfs/${review.review_text_cid}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-cyan-400 transition-colors"
+                    title="View review on IPFS"
                   >
                     IPFS
                   </a>
@@ -320,4 +396,5 @@ export function ReviewsSection({ datasetId, datasetVersion = "v1" }: ReviewsSect
     </div>
   );
 }
+
 

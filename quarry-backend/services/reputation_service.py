@@ -217,6 +217,19 @@ class ReputationService:
                 "verified_purchaser": True
             }
 
+            # Store in database for easy lookup
+            from database import db
+            db.create_usage_receipt({
+                "id": attestation["attestation_id"],
+                "reviewer_wallet": reviewer_wallet,
+                "dataset_id": dataset_id,
+                "dataset_version": dataset_version,
+                "attestation_address": attestation["attestation_address"],
+                "tx_signature": tx_signature,
+                "rows_accessed": rows_accessed,
+                "cost_paid": cost_paid,
+            })
+
             logger.info(f"Usage receipt created: {receipt['receipt_id']}")
             return receipt
 

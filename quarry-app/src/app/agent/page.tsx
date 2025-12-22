@@ -961,19 +961,13 @@ function AgentPageContent() {
                             <span className="text-white/80 font-medium">Cost</span>
                             <div className="text-cyan-400 font-semibold">
                               {(() => {
-                                const SOL_TO_USDC_RATE = 140.0;
                                 const originalCurrency = payReq.payment_details.currency || "SOL";
-                                const originalAmount = payReq.total_cost;
                                 const selectedCurrency = payReq.currency || "SOL";
-                                
-                                // Calculate display amount based on selected currency
-                                let displayAmount = originalAmount;
-                                if (originalCurrency === "SOL" && selectedCurrency === "USDC") {
-                                  displayAmount = originalAmount * SOL_TO_USDC_RATE;
-                                } else if (originalCurrency === "USDC" && selectedCurrency === "SOL") {
-                                  displayAmount = originalAmount / SOL_TO_USDC_RATE;
-                                }
-                                
+                                const displayAmount = calculatePaymentAmount(
+                                  payReq.total_cost,
+                                  originalCurrency,
+                                  selectedCurrency
+                                );
                                 return formatCurrency(displayAmount, selectedCurrency);
                               })()}
                             </div>
@@ -996,18 +990,13 @@ function AgentPageContent() {
                           ) : (
                             <>
                               Pay {(() => {
-                                const SOL_TO_USDC_RATE = 140.0;
                                 const originalCurrency = payReq.payment_details.currency || "SOL";
-                                const originalAmount = payReq.total_cost;
                                 const selectedCurrency = payReq.currency || "SOL";
-                                
-                                let displayAmount = originalAmount;
-                                if (originalCurrency === "SOL" && selectedCurrency === "USDC") {
-                                  displayAmount = originalAmount * SOL_TO_USDC_RATE;
-                                } else if (originalCurrency === "USDC" && selectedCurrency === "SOL") {
-                                  displayAmount = originalAmount / SOL_TO_USDC_RATE;
-                                }
-                                
+                                const displayAmount = calculatePaymentAmount(
+                                  payReq.total_cost,
+                                  originalCurrency,
+                                  selectedCurrency
+                                );
                                 return formatCurrency(displayAmount, selectedCurrency);
                               })()}
                             </>

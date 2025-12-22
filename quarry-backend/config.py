@@ -45,6 +45,9 @@ class Settings(BaseSettings):
         140.0  # SOL/USDC exchange rate (update periodically or use oracle)
     )
 
+    # NextJS API URL (for x402 proxy)
+    nextjs_api_url: str = "http://localhost:3000"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -3,18 +3,31 @@ Solana Attestation Service (SAS) Integration.
 
 This service handles creating and managing on-chain attestations for
 dataset reputation, publisher verification, and usage receipts.
+
+MVP Implementation: Uses Solana transaction memos to store attestation data.
+- Attestations are stored as JSON in transaction memo instructions
+- The transaction signature is the attestation ID
+- Fully on-chain, immutable, and verifiable
+- No custom program needed
 """
 
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import base58
+import json
 from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Confirmed
+from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.transaction import Transaction
+from solders.signature import Signature
+from solders.transaction import VersionedTransaction
+from solders.message import MessageV0
+from solders.instruction import Instruction
+from solders.system_program import ID as SYS_PROGRAM_ID
+from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
 import hashlib
-import struct
 
 from config import settings
 
@@ -24,8 +37,8 @@ logger = logging.getLogger(__name__)
 class SASService:
     """Service for Solana Attestation Service operations."""
 
-    # SAS Program ID (placeholder - replace with actual SAS program ID)
-    SAS_PROGRAM_ID = "SAS1111111111111111111111111111111111111111"
+    # Memo Program ID (official Solana memo program)
+    MEMO_PROGRAM_ID = Pubkey.from_string("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 
     def __init__(self):
         """Initialize SAS service."""
@@ -106,9 +119,29 @@ class SASService:
             # Load or generate authority keypair
             authority_key = getattr(settings, "sas_authority_key", None)
             if authority_key:
-                # Load from secret key
-                secret_bytes = base58.b58decode(authority_key)
-                self.authority_keypair = Keypair.from_bytes(secret_bytes)
+                # Load from secret key (base58 encoded)
+                try:
+                    secret_bytes = base58.b58decode(authority_key)
+                    # Keypair.from_bytes expects 64 bytes (32 secret + 32 public)
+                    # If we only have 32 bytes, we need to use from_seed
+                    if len(secret_bytes) == 32:
+                        # This is just the seed, derive the keypair
+                        self.authority_keypair = Keypair.from_seed(secret_bytes)
+                    elif len(secret_bytes) == 64:
+                        # Full keypair bytes
+                        self.authority_keypair = Keypair.from_bytes(secret_bytes)
+                    else:
+                        raise ValueError(
+                            f"Invalid key length: {len(secret_bytes)} bytes"
+                        )
+                    logger.info(f"✅ Loaded SAS authority from config")
+                except Exception as e:
+                    logger.error(f"Failed to load authority key: {e}")
+                    # Fallback to generating new one
+                    self.authority_keypair = Keypair()
+                    logger.warning(
+                        "Generated new SAS authority keypair - set SAS_AUTHORITY_KEY in production"
+                    )
             else:
                 # Generate new keypair (for development only)
                 self.authority_keypair = Keypair()
@@ -167,7 +200,7 @@ class SASService:
         expiry_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Create an attestation on-chain.
+        Create an attestation on-chain using Solana transaction memos.
 
         Args:
             schema_name: Name of the schema to use
@@ -176,7 +209,7 @@ class SASService:
             expiry_days: Optional expiry in days from now
 
         Returns:
-            Attestation details including transaction signature
+            Attestation details including real transaction signature
         """
         await self.connect()
 
@@ -194,53 +227,131 @@ class SASService:
                     (datetime.utcnow() + timedelta(days=expiry_days)).timestamp()
                 )
 
-            # In a real implementation, this would:
-            # 1. Serialize data according to schema
-            # 2. Create transaction with SAS program instructions
-            # 3. Sign and send transaction
-            # 4. Return transaction signature and attestation address
+            issued_at = datetime.utcnow().isoformat()
 
-            # For now, we'll simulate the attestation creation
-            attestation_id = hashlib.sha256(
-                f"{schema_name}{subject}{data}{datetime.utcnow().isoformat()}".encode()
-            ).hexdigest()[:16]
-
-            attestation = {
-                "attestation_id": attestation_id,
+            # Create attestation payload
+            attestation_payload = {
+                "type": "quarry_attestation",
+                "version": "1.0",
                 "schema": schema_name,
                 "subject": subject,
                 "issuer": str(self.authority_keypair.pubkey()),
                 "data": data,
-                "issued_at": datetime.utcnow().isoformat(),
+                "issued_at": issued_at,
+                "expires_at": datetime.fromtimestamp(expiry_timestamp).isoformat()
+                if expiry_timestamp
+                else None,
+            }
+
+            # Serialize to JSON
+            memo_data = json.dumps(attestation_payload, separators=(",", ":"))
+
+            # Memo program limits to ~566 bytes, so truncate if needed
+            if len(memo_data) > 500:
+                logger.warning(
+                    f"Attestation data too large ({len(memo_data)} bytes), truncating..."
+                )
+                # Keep essential fields, truncate data
+                attestation_payload["data"] = str(data)[:200] + "..."
+                memo_data = json.dumps(attestation_payload, separators=(",", ":"))[:500]
+
+            logger.info(f"Creating on-chain attestation ({len(memo_data)} bytes)")
+
+            # Create memo instruction
+            memo_instruction = Instruction(
+                program_id=self.MEMO_PROGRAM_ID,
+                accounts=[],
+                data=memo_data.encode("utf-8"),
+            )
+
+            # Get recent blockhash
+            blockhash_resp = await self.client.get_latest_blockhash(Confirmed)
+            recent_blockhash = blockhash_resp.value.blockhash
+
+            # Create message with compute budget and memo
+            instructions = [
+                set_compute_unit_limit(200_000),
+                set_compute_unit_price(1),
+                memo_instruction,
+            ]
+
+            message = MessageV0.try_compile(
+                payer=self.authority_keypair.pubkey(),
+                instructions=instructions,
+                address_lookup_table_accounts=[],
+                recent_blockhash=recent_blockhash,
+            )
+
+            # Create and sign transaction
+            transaction = VersionedTransaction(message, [self.authority_keypair])
+
+            # Send transaction
+            tx_resp = await self.client.send_transaction(
+                transaction,
+                opts=TxOpts(skip_preflight=False, preflight_commitment=Confirmed),
+            )
+
+            signature = str(tx_resp.value)
+            logger.info(f"✅ Attestation created on-chain: {signature}")
+
+            # Confirm transaction (convert string to Signature object)
+            sig_obj = Signature.from_string(signature)
+            confirm_resp = await self.client.confirm_transaction(
+                sig_obj, commitment=Confirmed
+            )
+
+            # Check if transaction failed
+            # confirm_resp.value is a list of status results
+            if confirm_resp.value and len(confirm_resp.value) > 0:
+                status = confirm_resp.value[0]
+                if status and hasattr(status, "err") and status.err:
+                    raise Exception(f"Transaction failed: {status.err}")
+
+            # Return attestation details
+            attestation = {
+                "attestation_id": signature,  # Transaction signature IS the attestation ID
+                "schema": schema_name,
+                "subject": subject,
+                "issuer": str(self.authority_keypair.pubkey()),
+                "data": data,
+                "issued_at": issued_at,
                 "expires_at": datetime.fromtimestamp(expiry_timestamp).isoformat()
                 if expiry_timestamp
                 else None,
                 "expiry_timestamp": expiry_timestamp,
                 "status": "active",
                 "revoked": False,
-                # In production, these would be real on-chain values
-                "transaction_signature": f"sim_{attestation_id}_tx",
-                "attestation_address": f"sim_{attestation_id}_addr",
+                "transaction_signature": signature,
+                "attestation_address": signature,  # For compatibility
+                "on_chain": True,
+                "explorer_url": f"https://explorer.solana.com/tx/{signature}?cluster=devnet"
+                if "devnet" in settings.solana_rpc_url.lower()
+                else f"https://explorer.solana.com/tx/{signature}",
             }
 
             logger.info(
-                f"Created attestation: {attestation_id} for schema {schema_name}"
+                f"✨ Created attestation: {signature[:16]}... for schema {schema_name}"
             )
+            logger.info(f"🔗 View on explorer: {attestation['explorer_url']}")
+
             return attestation
 
         except Exception as e:
-            logger.error(f"Failed to create attestation: {e}")
+            logger.error(f"❌ Failed to create attestation: {e}")
+            import traceback
+
+            traceback.print_exc()
             raise
 
     async def verify_attestation(self, attestation_id: str) -> Dict[str, Any]:
         """
-        Verify an attestation is valid (not expired, not revoked).
+        Verify an attestation by fetching the transaction from Solana.
 
         Args:
-            attestation_id: Attestation identifier
+            attestation_id: Transaction signature of the attestation
 
         Returns:
-            Verification result
+            Verification result with attestation data
         """
         await self.connect()
 
@@ -248,25 +359,142 @@ class SASService:
             raise Exception("Not connected to Solana")
 
         try:
-            # In production, this would fetch the attestation from on-chain
-            # For now, we simulate verification
+            logger.info(f"🔍 Verifying attestation: {attestation_id}")
+            logger.info(
+                f"🔍 Attestation ID type: {type(attestation_id)}, length: {len(attestation_id)}"
+            )
+
+            # Fetch transaction from Solana (convert string to Signature object)
+            try:
+                sig_obj = Signature.from_string(attestation_id)
+            except Exception as sig_err:
+                logger.error(f"❌ Failed to parse signature: {attestation_id}")
+                logger.error(f"❌ Signature error: {sig_err}")
+                return {
+                    "attestation_id": attestation_id,
+                    "is_valid": False,
+                    "error": f"Invalid signature format: {sig_err}",
+                    "checked_at": datetime.utcnow().isoformat(),
+                }
+
+            tx_resp = await self.client.get_transaction(
+                sig_obj, encoding="json", max_supported_transaction_version=0
+            )
+
+            if not tx_resp.value:
+                logger.warning(f"❌ Transaction not found: {attestation_id}")
+                return {
+                    "attestation_id": attestation_id,
+                    "is_valid": False,
+                    "is_expired": False,
+                    "is_revoked": False,
+                    "issuer_verified": False,
+                    "schema_valid": False,
+                    "error": "Transaction not found on blockchain",
+                    "checked_at": datetime.utcnow().isoformat(),
+                }
+
+            # Check if transaction succeeded
+            if tx_resp.value.transaction.meta.err:
+                logger.warning(
+                    f"❌ Transaction failed: {tx_resp.value.transaction.meta.err}"
+                )
+                return {
+                    "attestation_id": attestation_id,
+                    "is_valid": False,
+                    "error": "Transaction failed",
+                    "checked_at": datetime.utcnow().isoformat(),
+                }
+
+            # Extract memo data from transaction
+            attestation_data = None
+            instructions = tx_resp.value.transaction.transaction.message.instructions
+
+            logger.info(f"🔍 Found {len(instructions)} instructions in transaction")
+
+            for i, ix in enumerate(instructions):
+                # Check if this is a memo instruction
+                try:
+                    logger.info(
+                        f"🔍 Instruction {i}: program_id={ix.program_id}, data type={type(ix.data)}"
+                    )
+
+                    # Handle different data formats
+                    if isinstance(ix.data, bytes):
+                        memo_text = ix.data.decode("utf-8")
+                    elif isinstance(ix.data, str):
+                        memo_text = ix.data
+                    else:
+                        # Try to convert to bytes first
+                        memo_text = bytes(ix.data).decode("utf-8")
+
+                    logger.info(f"🔍 Memo text preview: {memo_text[:100]}...")
+
+                    if memo_text.startswith('{"type":"quarry_attestation"'):
+                        attestation_data = json.loads(memo_text)
+                        logger.info(f"✅ Found attestation data in instruction {i}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Instruction {i} not a memo: {e}")
+                    continue
+
+            if not attestation_data:
+                logger.warning(f"❌ No attestation data found in transaction")
+                logger.warning(f"❌ Checked {len(instructions)} instructions")
+                return {
+                    "attestation_id": attestation_id,
+                    "is_valid": False,
+                    "error": "No attestation data in transaction",
+                    "checked_at": datetime.utcnow().isoformat(),
+                }
+
+            # Verify issuer matches
+            issuer_pubkey = str(self.authority_keypair.pubkey())
+            issuer_verified = attestation_data.get("issuer") == issuer_pubkey
+
+            # Check expiry
+            is_expired = False
+            if attestation_data.get("expires_at"):
+                expiry_time = datetime.fromisoformat(attestation_data["expires_at"])
+                is_expired = datetime.utcnow() > expiry_time
+
+            # Verify schema exists
+            schema_valid = attestation_data.get("schema") in self.schemas
+
+            is_valid = issuer_verified and not is_expired and schema_valid
 
             verification = {
                 "attestation_id": attestation_id,
-                "is_valid": True,
-                "is_expired": False,
-                "is_revoked": False,
-                "issuer_verified": True,
-                "schema_valid": True,
+                "is_valid": is_valid,
+                "is_expired": is_expired,
+                "is_revoked": False,  # No revocation mechanism in MVP
+                "issuer_verified": issuer_verified,
+                "schema_valid": schema_valid,
+                "attestation_data": attestation_data,
+                "on_chain": True,
                 "checked_at": datetime.utcnow().isoformat(),
             }
 
-            logger.info(f"Verified attestation: {attestation_id}")
+            if is_valid:
+                logger.info(f"✅ Attestation verified: {attestation_id[:16]}...")
+            else:
+                logger.warning(
+                    f"⚠️ Attestation invalid: expired={is_expired}, issuer_verified={issuer_verified}"
+                )
+
             return verification
 
         except Exception as e:
-            logger.error(f"Failed to verify attestation: {e}")
-            raise
+            logger.error(f"❌ Failed to verify attestation: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return {
+                "attestation_id": attestation_id,
+                "is_valid": False,
+                "error": str(e),
+                "checked_at": datetime.utcnow().isoformat(),
+            }
 
     async def create_dataset_quality_attestation(
         self,

@@ -7,7 +7,7 @@ from openai import AsyncOpenAI
 from config import settings
 from models import AgentChatRequest, PaymentConfirmation
 from database import db
-from x402_protocol import x402
+from x402_protocol_proxy import x402_proxy as x402
 from services.reputation_service import reputation_service
 import logging
 
@@ -282,6 +282,12 @@ CRITICAL: When using query_dataset:
 - DO NOT write COUNT(*) queries - the tool returns actual row data UNLESS explicitly asked to do so
 - The tool will return the actual data rows you can analyze
 
+CRITICAL SQL SYNTAX RULES:
+- Column names may contain SPACES (e.g. "Wakeup time", "Sleep duration")
+- When column names contain spaces, you MUST quote them with double quotes in SQL
+- Example: SELECT "Wakeup time", "Sleep duration" FROM table
+- DO NOT replace spaces with underscores - use the EXACT column names with quotes
+
 IMPORTANT: Use proper markdown formatting:
 - Put blank lines (double newline) between paragraphs
 - Put blank lines before and after headers
@@ -294,9 +300,11 @@ IMPORTANT: Use proper markdown formatting:
         for ds_info in request.datasets_info:
             system_prompt += f"\n**Dataset ID {ds_info.id}: {ds_info.name}**\n"
             system_prompt += f"Table name: `{ds_info.table_name}`\n"
-            system_prompt += "Schema:\n"
+            system_prompt += "Schema (use EXACT column names with double quotes if they contain spaces):\n"
             for col in ds_info.schema:
-                system_prompt += f"  - {col.name}: {col.type}\n"
+                # Show column name with quotes if it contains spaces
+                col_display = f'"{col.name}"' if " " in col.name else col.name
+                system_prompt += f"  - {col_display}: {col.type}\n"
 
     # Build messages for OpenAI API
     messages = [{"role": "system", "content": system_prompt}]

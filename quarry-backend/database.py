@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
@@ -7,6 +8,8 @@ import duckdb
 
 from config import settings
 from models import Dataset, ColumnSchema
+
+logger = logging.getLogger(__name__)
 
 
 class DuckDBManager:
@@ -72,6 +75,27 @@ class DuckDBManager:
             """)
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_reviews_wallet ON reviews(reviewer_wallet)
+            """)
+
+            # Create usage_receipts table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS usage_receipts (
+                    id VARCHAR PRIMARY KEY,
+                    reviewer_wallet VARCHAR NOT NULL,
+                    dataset_id VARCHAR NOT NULL,
+                    dataset_version VARCHAR DEFAULT 'v1',
+                    attestation_address VARCHAR NOT NULL,
+                    tx_signature VARCHAR NOT NULL,
+                    rows_accessed INTEGER,
+                    cost_paid DOUBLE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(reviewer_wallet, dataset_id, dataset_version)
+                )
+            """)
+
+            # Create index for usage receipts
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_usage_receipts_wallet ON usage_receipts(reviewer_wallet, dataset_id)
             """)
 
             # Create helpful votes table (prevent double voting)
@@ -336,11 +360,33 @@ class DuckDBManager:
             if sql:
                 # Execute custom SQL (sanitize in production!)
                 view_name = f"data_{dataset_slug.replace('-', '_')}"
+                
+                # First, get column names from parquet to do auto-quoting
+                try:
+                    parquet_cols = conn.execute(f"SELECT * FROM read_parquet('{dataset.parquet_path}') LIMIT 0").fetchall()
+                    column_names = [col[0] for col in conn.description]
+                    
+                    # Quote columns that have spaces
+                    quoted_sql = sql
+                    for col_name in column_names:
+                        if ' ' in col_name:
+                            import re
+                            # Replace unquoted occurrences with quoted version
+                            pattern = r'\b' + re.escape(col_name) + r'\b(?!["\'])'
+                            quoted_sql = re.sub(pattern, f'"{col_name}"', quoted_sql, flags=re.IGNORECASE)
+                    
+                    logger.debug(f"Original SQL: {sql}")
+                    logger.debug(f"Quoted SQL: {quoted_sql}")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-quote columns: {e}")
+                    quoted_sql = sql
+                
+                # Now create the view and execute
                 conn.execute(f"""
                     CREATE OR REPLACE TEMP VIEW {view_name} AS 
                     SELECT * FROM read_parquet('{dataset.parquet_path}')
                 """)
-                result = conn.execute(sql).fetchall()
+                result = conn.execute(quoted_sql).fetchall()
                 col_names = [col[0] for col in conn.description]
             else:
                 # Default query
@@ -529,6 +575,54 @@ class DuckDBManager:
             ).fetchone()
 
             return result[0] if result else 0
+
+    def create_usage_receipt(self, receipt_data: dict) -> bool:
+        """Store a usage receipt."""
+        with self.get_connection() as conn:
+            from datetime import datetime
+            now = datetime.utcnow().isoformat()
+            
+            # First try to update existing, then insert if not exists
+            conn.execute("""
+                INSERT INTO usage_receipts 
+                (id, reviewer_wallet, dataset_id, dataset_version, attestation_address, 
+                 tx_signature, rows_accessed, cost_paid, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (reviewer_wallet, dataset_id, dataset_version) 
+                DO UPDATE SET
+                    attestation_address = EXCLUDED.attestation_address,
+                    tx_signature = EXCLUDED.tx_signature,
+                    rows_accessed = EXCLUDED.rows_accessed,
+                    cost_paid = EXCLUDED.cost_paid,
+                    created_at = ?
+            """, [
+                receipt_data["id"],
+                receipt_data["reviewer_wallet"],
+                receipt_data["dataset_id"],
+                receipt_data.get("dataset_version", "v1"),
+                receipt_data["attestation_address"],
+                receipt_data["tx_signature"],
+                receipt_data.get("rows_accessed", 0),
+                receipt_data.get("cost_paid", 0.0),
+                now,
+                now,
+            ])
+            return True
+
+    def get_usage_receipt(self, reviewer_wallet: str, dataset_id: str, dataset_version: str = "v1") -> dict | None:
+        """Get usage receipt for a wallet and dataset."""
+        with self.get_connection() as conn:
+            result = conn.execute("""
+                SELECT * FROM usage_receipts 
+                WHERE reviewer_wallet = ? AND dataset_id = ? AND dataset_version = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, [reviewer_wallet, dataset_id, dataset_version]).fetchone()
+            
+            if result:
+                columns = [desc[0] for desc in conn.description]
+                return dict(zip(columns, result))
+            return None
 
 
 # Global database instance

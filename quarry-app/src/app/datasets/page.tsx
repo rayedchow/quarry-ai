@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, Tag, Upload, Wand2, Database, Sparkles, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { Search, Tag, Upload, Database, Loader2, AlertCircle } from "lucide-react";
 import { DatasetCard } from "@/components/sections/dataset-card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -73,20 +73,12 @@ export default function DatasetsPage() {
       {/* Hero Section */}
       <div className="glass-panel p-8 md:p-10 space-y-8">
         <div className="space-y-4">
-          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-1.5">
-            <Database className="h-3.5 w-3.5 text-cyan-400" />
-            <span className="text-xs font-medium text-cyan-400">Data Marketplace</span>
-          </div>
-
           <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-white">
-            Browse verified schemas.
-            <br />
-            <span className="text-gradient-accent">Zero data leaves a vault.</span>
+            <span className="text-gradient-accent">Datasets</span>
           </h1>
 
           <p className="max-w-2xl text-white/60 leading-relaxed">
-            Search by tag, provider, or column metadata. Attach any dataset to your
-            agent without touching raw rows.
+            Search by tag, provider, or column metadata.
           </p>
         </div>
 
@@ -166,23 +158,9 @@ export default function DatasetsPage() {
       {/* Dataset Grid */}
       <div>
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <p className="section-label">Available datasets</p>
-            <span className="stat-chip text-xs">
-              <span className="text-white">{total}</span>
-              <span className="text-white/40">total</span>
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={fetchDatasets}
-            disabled={loading}
-            className="text-white/50 hover:text-white"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <span className="text-sm text-white/40">
+            {total} {total === 1 ? 'dataset' : 'datasets'}
+          </span>
         </div>
 
         {error && (

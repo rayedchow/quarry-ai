@@ -1,45 +1,42 @@
-#!/usr/bin/env python3
 """
-Generate a Solana keypair for SAS authority.
-
-This script generates a new Solana keypair and outputs the public key
-and base58-encoded secret key for use in the .env file.
+Generate a new keypair for SAS (Solana Attestation Service) authority.
+The authority signs all attestations.
 """
 
-import sys
+from solders.keypair import Keypair
+import base58
 
-try:
-    from solders.keypair import Keypair
-    import base58
-except ImportError:
-    print("Error: Required packages not installed.")
-    print("Please install: pip install solders base58")
-    print("\nOr install all backend requirements:")
-    print("  cd quarry-backend && pip install -r requirements.txt")
-    sys.exit(1)
+# Generate new keypair
+keypair = Keypair()
 
+# Get the full keypair bytes (64 bytes: 32 secret + 32 public)
+keypair_bytes = bytes(keypair)
 
-def main():
-    print("Generating Solana keypair for SAS authority...\n")
-
-    keypair = Keypair()
-
-    # Get the secret key bytes (solders Keypair can be converted to bytes)
-    secret_bytes = bytes(keypair)
-
-    print("=" * 70)
-    print("SAS AUTHORITY KEYPAIR")
-    print("=" * 70)
-    print(f"\nPublic Key (Authority Address):")
-    print(f"  {keypair.pubkey()}")
-    print(f"\nSecret Key (Base58 - KEEP SECURE!):")
-    print(f"  {base58.b58encode(secret_bytes).decode()}")
-    print("\n" + "=" * 70)
-    print("\nAdd this to your .env file:")
-    print(f"SAS_AUTHORITY_KEY={base58.b58encode(secret_bytes).decode()}")
-    print("\n⚠️  IMPORTANT: Keep the secret key secure and never commit it to git!")
-    print("=" * 70)
-
-
-if __name__ == "__main__":
-    main()
+print("\n" + "=" * 60)
+print("SAS AUTHORITY KEYPAIR GENERATED")
+print("=" * 60)
+print()
+print(f"Public Key:  {keypair.pubkey()}")
+print()
+print(f"Secret Key (base58 - 64 bytes):")
+print(f"{base58.b58encode(keypair_bytes).decode()}")
+print()
+print("=" * 60)
+print()
+print("⚠️  SECURITY NOTES:")
+print("  - Keep the secret key PRIVATE")
+print("  - Add to .env as: sas_authority_key=<secret_key_above>")
+print("  - Never commit to git")
+print("  - This key signs all attestations")
+print()
+print("💡 For devnet testing:")
+print(f"  solana airdrop 2 {keypair.pubkey()} --url devnet")
+print()
+print("💡 For mainnet:")
+print(f"  Send SOL to: {keypair.pubkey()}")
+print("  - 0.01 SOL = ~2000 attestations")
+print("  - 0.1 SOL = ~20,000 attestations")
+print()
+print("Or use the web faucet (devnet only):")
+print("  https://faucet.solana.com/")
+print()
